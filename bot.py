@@ -1,7 +1,6 @@
 # =========================================
-# SAYANZI FINAL BOT
+# SAYANZI FINAL BOT (UPDATED)
 # discord.py 2.x
-# FULL FINAL VERSION
 # =========================================
 
 import discord
@@ -11,6 +10,7 @@ from datetime import timedelta
 import asyncio
 import sqlite3
 import time
+import random
 
 import os
 TOKEN = os.getenv("TOKEN")
@@ -80,11 +80,9 @@ def is_admin(interaction_or_member, guild=None):
     if not g:
         return False
     
-    # السماح لمالك السيرفر دائماً
     if user.id == g.owner_id:
         return True
 
-    # تحويل الكائن إلى Member إذا كان User عادياً لضمان قراءة الصلاحيات
     member = g.get_member(user.id)
     if member and member.guild_permissions.administrator:
         return True
@@ -149,11 +147,11 @@ class HelpSelect(discord.ui.Select):
         options = [
             discord.SelectOption(
                 label="All members 🔥",
-                description="اوامر الاعضاء"
+                description="اوامر الاعضاء والمسابقات"
             ),
             discord.SelectOption(
                 label="الادارة العليا 👑",
-                description="اوامر الادارة"
+                description="اوامر الادارة والحماية"
             )
         ]
 
@@ -195,10 +193,8 @@ class HelpSelect(discord.ui.Select):
 !افاتار
 !عضو
 !سيرفر
-
-!سجل
-
-!اقتراح
+!لغز (لعبة الألغاز)
+!come @الشخص
 """,
                 inline=False
             )
@@ -239,6 +235,7 @@ class HelpSelect(discord.ui.Select):
 /auto_reply_list
 
 /message
+/giveaway
 
 !clear
 !مسح
@@ -264,53 +261,39 @@ class HelpView(discord.ui.View):
         self.add_item(HelpSelect())
 
 # =========================================
-# SUGGEST SYSTEM
+# GIVEAWAY SYSTEM
 # =========================================
 
-class SuggestView(discord.ui.View):
+class GiveawayView(discord.ui.View):
 
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.yes_users = []
-        self.no_users = []
+    def __init__(self, prize, duration):
+        super().__init__(timeout=duration)
+        self.prize = prize
+        self.participants = []
 
     @discord.ui.button(
-        label="✅ 0",
-        style=discord.ButtonStyle.green
+        label="🎉 اشترك في الجيف أواي (0)",
+        style=discord.ButtonStyle.blurple,
+        custom_id="giveaway_btn"
     )
-    async def yes(
+    async def enter_giveaway(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-        if interaction.user.id in self.yes_users:
+        if interaction.user.id in self.participants:
             return await interaction.response.send_message(
-                "❌ صوتت بالفعل",
+                "❌ لقد انضممت مسبقاً لهذا الجيف أواي!",
                 ephemeral=True
             )
 
-        self.yes_users.append(interaction.user.id)
-        button.label = f"✅ {len(self.yes_users)}"
+        self.participants.append(interaction.user.id)
+        button.label = f"🎉 اشترك في الجيف أواي ({len(self.participants)})"
         await interaction.response.edit_message(view=self)
-
-    @discord.ui.button(
-        label="❌ 0",
-        style=discord.ButtonStyle.red
-    )
-    async def no(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        if interaction.user.id in self.no_users:
-            return await interaction.response.send_message(
-                "❌ صوتت بالفعل",
-                ephemeral=True
-            )
-
-        self.no_users.append(interaction.user.id)
-        button.label = f"❌ {len(self.no_users)}"
-        await interaction.response.edit_message(view=self)
+        await interaction.response.send_message(
+            "✅ تم تسجيل دخولك في السحب بنجاح!",
+            ephemeral=True
+        )
 
 # =========================================
 # READY
@@ -320,7 +303,6 @@ class SuggestView(discord.ui.View):
 async def on_ready():
     await bot.tree.sync()
     bot.add_view(HelpView())
-    bot.add_view(SuggestView())
     print(f"✅ Logged in as {bot.user}")
 
 # =========================================
@@ -611,6 +593,7 @@ async def profile(ctx, member: discord.Member = None):
     lvl = messages // 50
 
     created_at = member.created_at.strftime("%Y-%m-%d")
+    joined_at = member.joined_at.strftime("%Y-%m-%d") if member.joined_at else "غير معروف"
 
     embed = discord.Embed(
         title=f"Profile: {member.name}",
@@ -618,9 +601,11 @@ async def profile(ctx, member: discord.Member = None):
     )
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.add_field(name="🏷️ الاسم", value=f"`{member}`", inline=False)
-    embed.add_field(name="🆔 الاي دي", value=f"`{member.id}`", inline=False)
+    embed.add_field(name="🆔 الآيدي", value=f"`{member.id}`", inline=False)
     embed.add_field(name="📊 اللفل", value=f"`{lvl}` (XP: {messages})", inline=False)
-    embed.add_field(name="📅 مدة الحساب (تاريخ الإنشاء)", value=f"`{created_at}`", inline=False)
+    embed.add_field(name="👑 أعلى رتبة", value=member.top_role.mention, inline=False)
+    embed.add_field(name="📅 تاريخ إنشاء الحساب", value=f"`{created_at}`", inline=False)
+    embed.add_field(name="📥 تاريخ دخول السيرفر", value=f"`{joined_at}`", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -674,6 +659,83 @@ async def server_info(ctx):
         value=guild.member_count
     )
     await ctx.send(embed=embed)
+
+# =========================================
+# COME COMMAND (!come)
+# =========================================
+
+@bot.command(name="come")
+async def come_command(ctx, member: discord.Member = None):
+    if not member:
+        return await ctx.send("❌ يرجى منشن الشخص المراد استدعاؤه!")
+    
+    try:
+        embed = discord.Embed(
+            title="🔔 استدعاء جديد",
+            description=f"تم استدعائك من {ctx.author.mention}\nالى سيرفر (**{ctx.guild.name}**)\nننتظر حضورك",
+            color=COLOR
+        )
+        await member.send(embed=embed)
+        await ctx.send("تم ارسال الاستدعاء للشخص ! ✔️")
+    except:
+        await ctx.send("❌ تعذر إرسال رسالة خاصة لهذا الشخص (قد يكون مغلق الخاص).")
+
+# =========================================
+# RHYME / RIDDLE GAME (!لغز)
+# =========================================
+
+RIDDLES = [
+    {"riddle": "ما هو الشيء الذي كلما أخذت منه كبر وكلما وضعت فيه صغر؟", "answer": "الحفرة"},
+    {"riddle": "له أوراق وليس بنبات، وله جلد وليس بحيوان، وعلم وليس بإنسان، فمن يكون؟", "answer": "الكتاب"},
+    {"riddle": "ما هو الباب الذي لا يمكن فتحه؟", "answer": "الباب المفتوح"},
+    {"riddle": "يسير بلا رجلين ولا يدخول إلا للأذنين فما هو؟", "answer": "الصوت"},
+    {"riddle": "ما هو الشيء الذي يوجد في وسط مكة؟", "answer": "حرف الكاف"}
+]
+
+@bot.command(name="لغز")
+async def play_riddle(ctx):
+    game_channel = discord.utils.get(ctx.guild.text_channels, name="🎮-ألعاب-والغاز")
+    if not game_channel:
+        try:
+            game_channel = await ctx.guild.create_text_channel("🎮-ألعاب-والغاز")
+        except:
+            game_channel = ctx.channel
+
+    if ctx.channel.id != game_channel.id:
+        return await ctx.send(f"🎮 لعبة الألغاز مخصصة فقط في روم: {game_channel.mention}")
+
+    selected = random.choice(RIDDLES)
+    
+    embed = discord.Embed(
+        title="🧩 لعبة الألغاز والتحدي",
+        description=f"**{selected['riddle']}**\n\n⏱️ لديك 30 ثانية للإجابة هنا في الشات!",
+        color=COLOR
+    )
+    await game_channel.send(embed=embed)
+
+    def check(m):
+        return m.channel.id == game_channel.id and not m.author.bot and selected['answer'] in m.content
+
+    start_time = time.time()
+    try:
+        msg = await bot.wait_for('message', timeout=30.0, check=check)
+        end_time = time.time()
+        duration = round(end_time - start_time, 1)
+
+        winner_embed = discord.Embed(
+            title="🎉 You Win!",
+            description=f"مبروك {msg.author.mention}! لقد فزت بالإجابة الصحيحة وهي: **{selected['answer']}**",
+            color=0x00ff00
+        )
+        winner_embed.add_field(name="⏱️ المدة المستغرقـة", value=f"`{duration} ثانية`", inline=False)
+        await game_channel.send(embed=winner_embed)
+    except asyncio.TimeoutError:
+        timeout_embed = discord.Embed(
+            title="⏰ انتهى الوقت!",
+            description=f"لم يقم أحد بالإجابة الصحيحة. الإجابة كانت: **{selected['answer']}**",
+            color=0xff0000
+        )
+        await game_channel.send(embed=timeout_embed)
 
 # =========================================
 # WARNS
@@ -824,22 +886,6 @@ async def unlock(ctx):
     await ctx.send("🔓 تم فتح الشات")
 
 # =========================================
-# SUGGEST
-# =========================================
-
-@bot.command(name="اقتراح")
-async def suggest(ctx, *, text):
-    embed = discord.Embed(
-        title="💡 اقتراح",
-        description=text,
-        color=COLOR
-    )
-    await ctx.send(
-        embed=embed,
-        view=SuggestView()
-    )
-
-# =========================================
 # ADMIN SLASH
 # =========================================
 
@@ -958,6 +1004,53 @@ async def message(
         "✅ تم",
         ephemeral=True
     )
+
+@bot.tree.command(name="giveaway")
+@app_commands.describe(time="مدة الجيف اواي مثل 10s أو 5m أو 1h", winner="عدد الفائزين", give="جائزة المسابقة مثل 500k")
+async def giveaway_slash(
+    interaction: discord.Interaction,
+    time: str,
+    winner: int,
+    give: str
+):
+    if not is_admin(interaction):
+        try:
+            await interaction.user.send("❌ ليس لديك صلاحية Administrator.")
+        except:
+            pass
+        return await interaction.response.send_message("❌ ليس لديك صلاحية Administrator.", ephemeral=True)
+
+    seconds = parse_time(time)
+    if not seconds:
+        return await interaction.response.send_message("❌ صيغة الوقت غير صحيحة (مثال: 30s, 10m, 1h)", ephemeral=True)
+
+    view = GiveawayView(give, seconds)
+    
+    embed = discord.Embed(
+        title="🎉 GِIVEAWAY 🎉",
+        description=f"🎁 **{give}**\n\n👑 Hosted by {interaction.user.mention}\n👥 Winners: `{winner}`\n⏱️ Duration: `{time}`\n\nاضغط على الزر أدناه للمشاركة!",
+        color=COLOR
+    )
+    
+    await interaction.response.send_message("✅ تم بدء الجيف أواي بنجاح!", ephemeral=True)
+    msg = await interaction.channel.send(embed=embed, view=view)
+
+    await asyncio.sleep(seconds)
+
+    if not view.participants:
+        return await msg.edit(content="❌ انتهى الجيف أواي ولم يشارك أحد!", view=None)
+
+    actual_winners = min(winner, len(view.participants))
+    winners_ids = random.sample(view.participants, actual_winners)
+    winners_mentions = ", ".join([f"<@{uid}>" for uid in winners_ids])
+
+    winner_embed = discord.Embed(
+        title="🏆 انتهى الجيف أواي!",
+        description=f"الفائزون بالجائزة **{give}** هم: {winners_mentions} 🎉\n👑 Hosted by {interaction.user.mention}",
+        color=0x00ff00
+    )
+    await msg.edit(embed=winner_embed, view=None)
+    await interaction.channel.send(f"مبروك {winners_mentions} لقد فزتم بـ **{give}**! 🎊")
 
 @bot.tree.command(name="protection")
 async def protection(
