@@ -1027,7 +1027,7 @@ async def send_all(interaction: discord.Interaction, text: str):
             )
             await member.send(embed=embed)
             success += 1
-            await asyncio.sleep(3.5) # فاصل زمني 3.5 ثانية بين كل رسالة لمنع التببند
+            await asyncio.sleep(3.5)
         except:
             failed += 1
 
@@ -1057,7 +1057,7 @@ async def send_online(interaction: discord.Interaction, text: str):
             )
             await member.send(embed=embed)
             success += 1
-            await asyncio.sleep(3.5) # فاصل زمني 3.5 ثانية بين كل رسالة لمنع التببند
+            await asyncio.sleep(3.5)
         except:
             failed += 1
 
