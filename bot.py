@@ -1021,12 +1021,7 @@ async def send_all(interaction: discord.Interaction, text: str):
         if member.bot:
             continue
         try:
-            embed = discord.Embed(
-                title=f"📢 رسالة إدارية من سيرفر {interaction.guild.name}",
-                description=text,
-                color=COLOR
-            )
-            await member.send(embed=embed)
+            await member.send(text)
             success += 1
             await asyncio.sleep(3.5)
         except:
@@ -1051,12 +1046,7 @@ async def send_online(interaction: discord.Interaction, text: str):
         if member.status == discord.Status.offline:
             continue
         try:
-            embed = discord.Embed(
-                title=f"📢 رسالة إدارية من سيرفر {interaction.guild.name}",
-                description=text,
-                color=COLOR
-            )
-            await member.send(embed=embed)
+            await member.send(text)
             success += 1
             await asyncio.sleep(3.5)
         except:
@@ -1161,5 +1151,4 @@ async def auto_reply_list(interaction: discord.Interaction):
 # =========================================
 
 bot.run(TOKEN)
-
 
