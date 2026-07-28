@@ -283,8 +283,9 @@ class GiveawayView(discord.ui.View):
 
         self.participants.append(interaction.user.id)
         button.label = f"🎉 اشترك في الجيف أواي ({len(self.participants)})"
+        
         await interaction.response.edit_message(view=self)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "✅ تم تسجيل دخولك في السحب بنجاح!",
             ephemeral=True
         )
