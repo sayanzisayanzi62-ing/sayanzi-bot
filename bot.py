@@ -16,7 +16,7 @@ import os
 TOKEN = os.getenv("TOKEN")
 
 COLOR = 0x8000ff
-OWNER_ID = 144659234190865211
+OWNER_ID = 1446592341908652112
 SUPPORT_INVITE = "https://discord.gg/h3FB6hsmn"
 
 # =========================================
@@ -158,7 +158,7 @@ class HelpSelect(discord.ui.Select):
                 description=(
                     "𝐒𝐚𝐲𝐚𝐧𝐳𝐢 𝐛𝐨𝐭. 𝐈𝐭'𝐬 𝐚 𝐡𝐞𝐥𝐩 𝐛𝐨𝐭 𝐟𝐨𝐫 𝐬𝐨𝐦𝐞 𝐬𝐞𝐫𝐯𝐞𝐫𝐬; "
                     "𝐢𝐟 𝐲𝐨𝐮 𝐝𝐨𝐧'𝐭 𝐡𝐚𝐯𝐞 𝐚𝐧𝐲𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐡𝐞𝐥𝐩 𝐲𝐨𝐮, 𝐭𝐡𝐢𝐬 𝐢𝐬 𝐭𝐡𝐞 𝐬𝐨𝐥𝐮𝐭𝐢𝐨𝐧.\n"
-                    f"Support: {SUPPORT_INVIITE_OR_URL := SUPPORT_INVITE}"
+                    f"Support: {SUPPORT_INVITE}"
                 ),
                 color=COLOR
             )
@@ -1011,7 +1011,7 @@ async def send_all(interaction: discord.Interaction, text: str):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("❌ هذا الأمر مخصص لمالك البوت الأساسي فقط!", ephemeral=True)
 
-    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة لجميع الأعضاء (مع فاصل زمني للأمان)...", ephemeral=True)
+    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة لجميع الأعضاء (مع فاصل زمني للأمان 3.5 ثانية)...", ephemeral=True)
     
     success = 0
     failed = 0
@@ -1039,7 +1039,7 @@ async def send_online(interaction: discord.Interaction, text: str):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("❌ هذا الأمر مخصص لمالك البوت الأساسي فقط!", ephemeral=True)
 
-    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة للأعضاء المتواجدين (مع فاصل زمني للأمان)...", ephemeral=True)
+    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة للأعضاء المتواجدين (مع فاصل زمني للأمان 3.5 ثانية)...", ephemeral=True)
     
     success = 0
     failed = 0
@@ -1160,3 +1160,4 @@ async def auto_reply_list(interaction: discord.Interaction):
 # =========================================
 
 bot.run(TOKEN)
+
