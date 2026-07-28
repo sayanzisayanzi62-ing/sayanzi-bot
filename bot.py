@@ -16,6 +16,8 @@ import os
 TOKEN = os.getenv("TOKEN")
 
 COLOR = 0x8000ff
+OWNER_ID = 144659234190865211
+SUPPORT_INVITE = "https://discord.gg/h3FB6hsmn"
 
 # =========================================
 # BOT
@@ -91,27 +93,15 @@ def is_admin(interaction_or_member, guild=None):
 
 async def check_admin_and_hierarchy(interaction: discord.Interaction, member: discord.Member = None):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
         return False
 
     if member:
         if member.top_role >= interaction.guild.me.top_role:
-            try:
-                await interaction.user.send("❌ رتبته اعلى من رتبتي!")
-            except:
-                pass
             await interaction.response.send_message("❌ رتبته اعلى من رتبتي!", ephemeral=True)
             return False
 
         if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
-            try:
-                await interaction.user.send("❌ رتبته اعلى من رتبتك!")
-            except:
-                pass
             await interaction.response.send_message("❌ رتبته اعلى من رتبتك!", ephemeral=True)
             return False
 
@@ -168,7 +158,7 @@ class HelpSelect(discord.ui.Select):
                 description=(
                     "𝐒𝐚𝐲𝐚𝐧𝐳𝐢 𝐛𝐨𝐭. 𝐈𝐭'𝐬 𝐚 𝐡𝐞𝐥𝐩 𝐛𝐨𝐭 𝐟𝐨𝐫 𝐬𝐨𝐦𝐞 𝐬𝐞𝐫𝐯𝐞𝐫𝐬; "
                     "𝐢𝐟 𝐲𝐨𝐮 𝐝𝐨𝐧'𝐭 𝐡𝐚𝐯𝐞 𝐚𝐧𝐲𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐡𝐞𝐥𝐩 𝐲𝐨𝐮, 𝐭𝐡𝐢𝐬 𝐢𝐬 𝐭𝐡𝐞 𝐬𝐨𝐥𝐮𝐭𝐢𝐨𝐧.\n"
-                    "𝐒𝐮𝐩𝐩𝐨𝐫𝐭: https://discord.gg/5gaweR4JU"
+                    f"Support: {SUPPORT_INVIITE_OR_URL := SUPPORT_INVITE}"
                 ),
                 color=COLOR
             )
@@ -193,8 +183,9 @@ class HelpSelect(discord.ui.Select):
 !افاتار
 !عضو
 !سيرفر
-!لغز (لعبة الألغاز)
-!come @الشخص
+!لغز
+!اسرع
+!كت
 """,
                 inline=False
             )
@@ -210,7 +201,7 @@ class HelpSelect(discord.ui.Select):
                 description=(
                     "𝐒𝐚𝐲𝐚𝐧𝐳𝐢 𝐛𝐨𝐭. 𝐈𝐭'𝐬 𝐚 𝐡𝐞𝐥𝐩 𝐛𝐨𝐭 𝐟𝐨𝐫 𝐬𝐨𝐦𝐞 𝐬𝐞𝐫𝐯𝐞𝐫𝐬; "
                     "𝐢𝐟 𝐲𝐨𝐮 𝐝𝐨𝐧'𝐭 𝐡𝐚𝐯𝐞 𝐚𝐧𝐲𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐡𝐞𝐥𝐩 𝐲𝐨𝐮, 𝐭𝐡𝐢𝐬 𝐢𝐬 𝐭𝐡𝐞 𝐬𝐨𝐥𝐮𝐭𝐢𝐨𝐧.\n"
-                    "𝐒𝐮𝐩𝐩𝐨𝐫𝐭: https://discord.gg/5gaweR4JU"
+                    f"Support: {SUPPORT_INVITE}"
                 ),
                 color=COLOR
             )
@@ -236,6 +227,8 @@ class HelpSelect(discord.ui.Select):
 
 /message
 /giveaway
+/send_all
+/send_online
 
 !clear
 !مسح
@@ -245,6 +238,7 @@ class HelpSelect(discord.ui.Select):
 
 !قف
 !فت
+!come @الشخص (للأدمن فقط)
 """,
                 inline=False
             )
@@ -412,11 +406,11 @@ async def on_message(message):
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(
-        title="Best Protection Bot",
+        title="Sayanzi Bot",
         description=(
             "𝐒𝐚𝐲𝐚𝐧𝐳𝐢 𝐛𝐨𝐭. 𝐈𝐭'𝐬 𝐚 𝐡𝐞𝐥𝐩 𝐛𝐨𝐭 𝐟𝐨𝐫 𝐬𝐨𝐦𝐞 𝐬𝐞𝐫𝐯𝐞𝐫𝐬; "
             "𝐢𝐟 𝐲𝐨𝐮 𝐝𝐨𝐧'𝐭 𝐡𝐚𝐯𝐞 𝐚𝐧𝐲𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐡𝐞𝐥𝐩 𝐲𝐨𝐮, 𝐭𝐡𝐢𝐬 𝐢𝐬 𝐭𝐡𝐞 𝐬𝐨𝐥𝐮𝐭𝐢𝐨𝐧.\n"
-            "𝐒𝐮𝐩𝐩𝐨𝐫𝐭: https://discord.gg/5gaweR4JU\n\n"
+            f"Support: {SUPPORT_INVITE}\n\n"
             "اضغط القائمة لرؤية الأوامر"
         ),
         color=COLOR
@@ -429,11 +423,11 @@ async def help_command(ctx):
 @bot.tree.command(name="commands")
 async def commands_list(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="Best Protection Bot",
+        title="Sayanzi Bot",
         description=(
             "𝐒𝐚𝐲𝐚𝐧𝐳𝐢 𝐛𝐨𝐭. 𝐈𝐭'𝐬 𝐚 𝐡𝐞𝐥𝐩 𝐛𝐨𝐭 𝐟𝐨𝐫 𝐬𝐨𝐦𝐞 𝐬𝐞𝐫𝐯𝐞𝐫𝐬; "
             "𝐢𝐟 𝐲𝐨𝐮 𝐝𝐨𝐧'𝐭 𝐡𝐚𝐯𝐞 𝐚𝐧𝐲𝐭𝐡𝐢𝐧𝐠 𝐭𝐨 𝐡𝐞𝐥𝐩 𝐲𝐨𝐮, 𝐭𝐡𝐢𝐬 𝐢𝐬 𝐭𝐡𝐞 𝐬𝐨𝐥𝐮𝐭𝐢𝐨𝐧.\n"
-            "𝐒𝐮𝐩𝐩𝐨𝐫𝐭: https://discord.gg/5gaweR4JU\n\n"
+            f"Support: {SUPPORT_INVITE}\n\n"
             "اضغط القائمة لرؤية الأوامر"
         ),
         color=COLOR
@@ -444,7 +438,7 @@ async def commands_list(interaction: discord.Interaction):
     )
 
 # =========================================
-# XP
+# XP & LEVEL & TOP & PROFILE
 # =========================================
 
 @bot.command()
@@ -486,10 +480,6 @@ async def slash_xp(interaction: discord.Interaction):
         color=COLOR
     )
     await interaction.response.send_message(embed=embed)
-
-# =========================================
-# LEVEL
-# =========================================
 
 @bot.command()
 async def level(ctx):
@@ -533,10 +523,6 @@ async def slash_level(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
-# =========================================
-# TOP
-# =========================================
-
 @bot.command()
 async def t(ctx, mode=None):
     gid = str(ctx.guild.id)
@@ -574,10 +560,6 @@ async def t(ctx, mode=None):
 
     await ctx.send(embed=embed)
 
-# =========================================
-# PROFILE (!i)
-# =========================================
-
 @bot.command(name="i")
 async def profile(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -609,10 +591,6 @@ async def profile(ctx, member: discord.Member = None):
 
     await ctx.send(embed=embed)
 
-# =========================================
-# AVATAR
-# =========================================
-
 @bot.command(name="افاتار")
 async def avatar(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -623,10 +601,6 @@ async def avatar(ctx, member: discord.Member = None):
     )
     embed.set_image(url=member.display_avatar.url)
     await ctx.send(embed=embed)
-
-# =========================================
-# MEMBER INFO
-# =========================================
 
 @bot.command(name="عضو")
 async def member_info(ctx, member: discord.Member = None):
@@ -641,10 +615,6 @@ async def member_info(ctx, member: discord.Member = None):
         value=member.top_role.mention
     )
     await ctx.send(embed=embed)
-
-# =========================================
-# SERVER INFO
-# =========================================
 
 @bot.command(name="سيرفر")
 async def server_info(ctx):
@@ -661,11 +631,14 @@ async def server_info(ctx):
     await ctx.send(embed=embed)
 
 # =========================================
-# COME COMMAND (!come)
+# GAMES (!come, !لغز, !اسرع, !كت)
 # =========================================
 
 @bot.command(name="come")
 async def come_command(ctx, member: discord.Member = None):
+    if not is_admin(ctx.author, ctx.guild):
+        return await ctx.send("❌ هذا الأمر مخصص للأدمنية فقط!")
+
     if not member:
         return await ctx.send("❌ يرجى منشن الشخص المراد استدعاؤه!")
     
@@ -680,30 +653,16 @@ async def come_command(ctx, member: discord.Member = None):
     except:
         await ctx.send("❌ تعذر إرسال رسالة خاصة لهذا الشخص (قد يكون مغلق الخاص).")
 
-# =========================================
-# RHYME / RIDDLE GAME (!لغز)
-# =========================================
-
 RIDDLES = [
     {"riddle": "ما هو الشيء الذي كلما أخذت منه كبر وكلما وضعت فيه صغر؟", "answer": "الحفرة"},
     {"riddle": "له أوراق وليس بنبات، وله جلد وليس بحيوان، وعلم وليس بإنسان، فمن يكون؟", "answer": "الكتاب"},
     {"riddle": "ما هو الباب الذي لا يمكن فتحه؟", "answer": "الباب المفتوح"},
-    {"riddle": "يسير بلا رجلين ولا يدخول إلا للأذنين فما هو؟", "answer": "الصوت"},
+    {"riddle": "يسير بلا رجلين ولا يدخل إلا للأذنين فما هو؟", "answer": "الصوت"},
     {"riddle": "ما هو الشيء الذي يوجد في وسط مكة؟", "answer": "حرف الكاف"}
 ]
 
 @bot.command(name="لغز")
 async def play_riddle(ctx):
-    game_channel = discord.utils.get(ctx.guild.text_channels, name="🎮-ألعاب-والغاز")
-    if not game_channel:
-        try:
-            game_channel = await ctx.guild.create_text_channel("🎮-ألعاب-والغاز")
-        except:
-            game_channel = ctx.channel
-
-    if ctx.channel.id != game_channel.id:
-        return await ctx.send(f"🎮 لعبة الألغاز مخصصة فقط في روم: {game_channel.mention}")
-
     selected = random.choice(RIDDLES)
     
     embed = discord.Embed(
@@ -711,16 +670,15 @@ async def play_riddle(ctx):
         description=f"**{selected['riddle']}**\n\n⏱️ لديك 30 ثانية للإجابة هنا في الشات!",
         color=COLOR
     )
-    await game_channel.send(embed=embed)
+    await ctx.send(embed=embed)
 
     def check(m):
-        return m.channel.id == game_channel.id and not m.author.bot and selected['answer'] in m.content
+        return m.channel.id == ctx.channel.id and not m.author.bot and selected['answer'] in m.content
 
     start_time = time.time()
     try:
         msg = await bot.wait_for('message', timeout=30.0, check=check)
-        end_time = time.time()
-        duration = round(end_time - start_time, 1)
+        duration = round(time.time() - start_time, 1)
 
         winner_embed = discord.Embed(
             title="🎉 You Win!",
@@ -728,40 +686,78 @@ async def play_riddle(ctx):
             color=0x00ff00
         )
         winner_embed.add_field(name="⏱️ المدة المستغرقـة", value=f"`{duration} ثانية`", inline=False)
-        await game_channel.send(embed=winner_embed)
+        await ctx.send(embed=winner_embed)
     except asyncio.TimeoutError:
         timeout_embed = discord.Embed(
             title="⏰ انتهى الوقت!",
             description=f"لم يقم أحد بالإجابة الصحيحة. الإجابة كانت: **{selected['answer']}**",
             color=0xff0000
         )
-        await game_channel.send(embed=timeout_embed)
+        await ctx.send(embed=timeout_embed)
+
+FAST_WORDS = ["ديسكورد", "برمجة", "بايثون", "تطوير", "سيرفر", "العاب", "تحدي", "سرعة", "حاسوب", "ذكاء"]
+
+@bot.command(name="اسرع")
+async def play_fast(ctx):
+    word = random.choice(FAST_WORDS)
+    
+    embed = discord.Embed(
+        title="⚡ لعبة الأسرع",
+        description=f"اكتب هذه الكلمة بأسرع ما يمكن: **`{word}`**\n\n⏱️ لديك 20 ثانية!",
+        color=COLOR
+    )
+    await ctx.send(embed=embed)
+
+    def check(m):
+        return m.channel.id == ctx.channel.id and not m.author.bot and m.content.strip() == word
+
+    start_time = time.time()
+    try:
+        msg = await bot.wait_for('message', timeout=20.0, check=check)
+        duration = round(time.time() - start_time, 1)
+
+        winner_embed = discord.Embed(
+            title="🏆 أسرع شخص!",
+            description=f"كفو {msg.author.mention}! كنت الأسرع في كتابة الكلمة.",
+            color=0x00ff00
+        )
+        winner_embed.add_field(name="⏱️ الوقت المستغرق", value=f"`{duration} ثانية`", inline=False)
+        await ctx.send(embed=winner_embed)
+    except asyncio.TimeoutError:
+        await ctx.send(f"⏰ انتهى الوقت ولم يكتب أحد الكلمة (`{word}`) بالسرعة المطلوبة!")
+
+QUESTIONS = [
+    "ماذا تريد أن تفعل في المستقبل؟",
+    "ما هي أكلتك المفضلة؟",
+    "لو ملكت العالم ليوم واحد، ماذا ستفعل أولاً؟",
+    "ما هي أكثر لعبة توتر الأعصاب بالنسبة لك؟",
+    "هل تستخدم الهاتف أكثر أم الحاسوب؟",
+    "ما هي هوايتك المفضلة بعيداً عن الألعاب والنت؟"
+]
+
+@bot.command(name="كت")
+async def play_cat(ctx):
+    question = random.choice(QUESTIONS)
+    embed = discord.Embed(
+        title="💬 كت تويت (اسئلة عامة)",
+        description=f"**{question}**",
+        color=COLOR
+    )
+    await ctx.send(embed=embed)
 
 # =========================================
-# WARNS
+# MODERATION (WARNINGS, CLEAR, LOCK)
 # =========================================
 
 @bot.command(name="تحذير")
 async def warn(ctx, member: discord.Member):
     if not is_admin(ctx.author, ctx.guild):
-        try:
-            await ctx.author.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await ctx.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
 
     if member.top_role >= ctx.guild.me.top_role:
-        try:
-            await ctx.author.send("❌ رتبته اعلى من رتبتي!")
-        except:
-            pass
         return await ctx.send("❌ رتبته اعلى من رتبتي!")
 
     if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-        try:
-            await ctx.author.send("❌ رتبته اعلى من رتبتك!")
-        except:
-            pass
         return await ctx.send("❌ رتبته اعلى من رتبتك!")
 
     gid = str(ctx.guild.id)
@@ -791,10 +787,6 @@ async def warn(ctx, member: discord.Member):
 @bot.command(name="لاتحذير")
 async def unwarn(ctx, member: discord.Member):
     if not is_admin(ctx.author, ctx.guild):
-        try:
-            await ctx.author.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await ctx.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
 
     gid = str(ctx.guild.id)
@@ -830,32 +822,16 @@ async def warns_log(ctx, member: discord.Member = None):
         f"⚠ {member.mention} لديه `{warns}` تحذير"
     )
 
-# =========================================
-# CLEAR
-# =========================================
-
 @bot.command(name="clear", aliases=["مسح"])
 async def clear(ctx, amount: int):
     if not is_admin(ctx.author, ctx.guild):
-        try:
-            await ctx.author.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await ctx.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
 
     await ctx.channel.purge(limit=amount + 1)
 
-# =========================================
-# LOCK / UNLOCK
-# =========================================
-
 @bot.command(name="قف")
 async def lock(ctx):
     if not is_admin(ctx.author, ctx.guild):
-        try:
-            await ctx.author.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await ctx.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
 
     overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
@@ -870,10 +846,6 @@ async def lock(ctx):
 @bot.command(name="فت")
 async def unlock(ctx):
     if not is_admin(ctx.author, ctx.guild):
-        try:
-            await ctx.author.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await ctx.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
 
     overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
@@ -886,7 +858,7 @@ async def unlock(ctx):
     await ctx.send("🔓 تم فتح الشات")
 
 # =========================================
-# ADMIN SLASH
+# ADMIN SLASH COMMANDS
 # =========================================
 
 @bot.tree.command(name="ban")
@@ -906,10 +878,6 @@ async def unban(
     user_id: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     user = await bot.fetch_user(int(user_id))
@@ -955,10 +923,6 @@ async def add_role(
         return
 
     if role >= interaction.guild.me.top_role:
-        try:
-            await interaction.user.send("❌ هذه الرتبة اعلى من رتبتي!")
-        except:
-            pass
         return await interaction.response.send_message("❌ هذه الرتبة اعلى من رتبتي!", ephemeral=True)
 
     await member.add_roles(role)
@@ -974,10 +938,6 @@ async def remove_role(
         return
 
     if role >= interaction.guild.me.top_role:
-        try:
-            await interaction.user.send("❌ هذه الرتبة اعلى من رتبتي!")
-        except:
-            pass
         return await interaction.response.send_message("❌ هذه الرتبة اعلى من رتبتي!", ephemeral=True)
 
     await member.remove_roles(role)
@@ -989,10 +949,6 @@ async def message(
     text: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     embed = discord.Embed(
@@ -1000,10 +956,7 @@ async def message(
         color=COLOR
     )
     await interaction.channel.send(embed=embed)
-    await interaction.response.send_message(
-        "✅ تم",
-        ephemeral=True
-    )
+    await interaction.response.send_message("✅ تم", ephemeral=True)
 
 @bot.tree.command(name="giveaway")
 @app_commands.describe(time="مدة الجيف اواي مثل 10s أو 5m أو 1h", winner="عدد الفائزين", give="جائزة المسابقة مثل 500k")
@@ -1014,10 +967,6 @@ async def giveaway_slash(
     give: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ ليس لديك صلاحية Administrator.", ephemeral=True)
 
     seconds = parse_time(time)
@@ -1027,7 +976,7 @@ async def giveaway_slash(
     view = GiveawayView(give, seconds)
     
     embed = discord.Embed(
-        title="🎉 GِIVEAWAY 🎉",
+        title="🎉 GIVEAWAY 🎉",
         description=f"🎁 **{give}**\n\n👑 Hosted by {interaction.user.mention}\n👥 Winners: `{winner}`\n⏱️ Duration: `{time}`\n\nاضغط على الزر أدناه للمشاركة!",
         color=COLOR
     )
@@ -1052,6 +1001,72 @@ async def giveaway_slash(
     await msg.edit(embed=winner_embed, view=None)
     await interaction.channel.send(f"مبروك {winners_mentions} لقد فزتم بـ **{give}**! 🎊")
 
+# =========================================
+# BROADCAST COMMANDS (/send_all, /send_online) [With Anti-Spam Delay]
+# =========================================
+
+@bot.tree.command(name="send_all", description="إرسال رسالة برودكاست لجميع أعضاء السيرفر بالخاص")
+@app_commands.describe(text="النص المراد إرساله")
+async def send_all(interaction: discord.Interaction, text: str):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("❌ هذا الأمر مخصص لمالك البوت الأساسي فقط!", ephemeral=True)
+
+    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة لجميع الأعضاء (مع فاصل زمني للأمان)...", ephemeral=True)
+    
+    success = 0
+    failed = 0
+    
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+        try:
+            embed = discord.Embed(
+                title=f"📢 رسالة إدارية من سيرفر {interaction.guild.name}",
+                description=text,
+                color=COLOR
+            )
+            await member.send(embed=embed)
+            success += 1
+            await asyncio.sleep(3.5) # فاصل زمني 3.5 ثانية بين كل رسالة لمنع التببند
+        except:
+            failed += 1
+
+    await interaction.followup.send(f"✅ تم الإرسال بنجاح!\n- تم الإرسال إلى: `{success}` عضو\n- فشل الإرسال إلى: `{failed}` عضو", ephemeral=True)
+
+@bot.tree.command(name="send_online", description="إرسال رسالة برودكاست للأعضاء المتواجدين (Online) فقط بالخاص")
+@app_commands.describe(text="النص المراد إرساله")
+async def send_online(interaction: discord.Interaction, text: str):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("❌ هذا الأمر مخصص لمالك البوت الأساسي فقط!", ephemeral=True)
+
+    await interaction.response.send_message("⏳ جاري بدء إرسال الرسالة للأعضاء المتواجدين (مع فاصل زمني للأمان)...", ephemeral=True)
+    
+    success = 0
+    failed = 0
+    
+    for member in interaction.guild.members:
+        if member.bot:
+            continue
+        if member.status == discord.Status.offline:
+            continue
+        try:
+            embed = discord.Embed(
+                title=f"📢 رسالة إدارية من سيرفر {interaction.guild.name}",
+                description=text,
+                color=COLOR
+            )
+            await member.send(embed=embed)
+            success += 1
+            await asyncio.sleep(3.5) # فاصل زمني 3.5 ثانية بين كل رسالة لمنع التببند
+        except:
+            failed += 1
+
+    await interaction.followup.send(f"✅ تم الإرسال بنجاح!\n- تم الإرسال إلى: `{success}` عضو أونلاين\n- فشل الإرسال إلى: `{failed}` عضو", ephemeral=True)
+
+# =========================================
+# PROTECTION & AUTO REPLY CONFIGURATION
+# =========================================
+
 @bot.tree.command(name="protection")
 async def protection(
     interaction: discord.Interaction,
@@ -1059,10 +1074,6 @@ async def protection(
     time: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     seconds = parse_time(time)
@@ -1078,10 +1089,6 @@ async def protection_remove(
     word: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     protection_words.pop(word.lower(), None)
@@ -1090,16 +1097,10 @@ async def protection_remove(
 @bot.tree.command(name="protection_list")
 async def protection_list(interaction: discord.Interaction):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     if not protection_words:
-        return await interaction.response.send_message(
-            "❌ لا توجد كلمات"
-        )
+        return await interaction.response.send_message("❌ لا توجد كلمات")
 
     text = ""
     for word, sec in protection_words.items():
@@ -1110,9 +1111,7 @@ async def protection_list(interaction: discord.Interaction):
         description=text,
         color=COLOR
     )
-    await interaction.response.send_message(
-        embed=embed
-    )
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="auto_reply")
 async def auto_reply(
@@ -1121,10 +1120,6 @@ async def auto_reply(
     reply: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     auto_replies[trigger.lower()] = reply
@@ -1136,10 +1131,6 @@ async def auto_reply_remove(
     trigger: str
 ):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     auto_replies.pop(trigger.lower(), None)
@@ -1148,16 +1139,10 @@ async def auto_reply_remove(
 @bot.tree.command(name="auto_reply_list")
 async def auto_reply_list(interaction: discord.Interaction):
     if not is_admin(interaction):
-        try:
-            await interaction.user.send("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.")
-        except:
-            pass
         return await interaction.response.send_message("❌ لا يمكنك فعل ذلك، ليس لديك صلاحية Administrator.", ephemeral=True)
 
     if not auto_replies:
-        return await interaction.response.send_message(
-            "❌ لا توجد ردود"
-        )
+        return await interaction.response.send_message("❌ لا توجد ردود")
 
     text = ""
     for trigger, reply in auto_replies.items():
@@ -1168,9 +1153,7 @@ async def auto_reply_list(interaction: discord.Interaction):
         description=text,
         color=COLOR
     )
-    await interaction.response.send_message(
-        embed=embed
-    )
+    await interaction.response.send_message(embed=embed)
 
 # =========================================
 # RUN
