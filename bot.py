@@ -18,7 +18,7 @@ TOKEN = os.getenv("TOKEN")
 
 COLOR = 0x8000ff
 OWNER_ID = 1446592341908652112
-SUPPORT_INVITE = "https://discord.gg/h3FB6hsmn"
+SUPPORT_INVITE = "https://discord.gg/FMEXcwAvg"
 BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348&permissions=8&integration_type=0&scope=bot"
 
 # =========================================
@@ -310,9 +310,9 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(
                 name="🛡️ Moderation & Security",
                 value="""
-!تحذير @member | !لاتحذير @member | !سجل @member
+/unwarn @member | !سجل @member
 !clear <number> / !مسح <number>
-!قف | !فت
+/lock | /open
 /ban | /unban
 /timeout | /timeout_remove
 /add_role | /remove_role
@@ -555,7 +555,7 @@ async def suggestion_command(ctx, *, text: str = None):
 # =========================================
 
 @bot.tree.command(name="send_all", description="Broadcast message to all members in the server (Bot Owner only)")
-@app_commands.describe(text="Message content to broadcast")
+@app_commands.describe(text="Message content to broadcast (use [user] for mention)")
 async def send_all(interaction: discord.Interaction, text: str):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
@@ -569,7 +569,8 @@ async def send_all(interaction: discord.Interaction, text: str):
         if member.bot:
             continue
         try:
-            await member.send(text)
+            personalized_text = text.replace("[user]", member.mention)
+            await member.send(personalized_text)
             success_count += 1
             await asyncio.sleep(3.5)
         except:
@@ -578,7 +579,7 @@ async def send_all(interaction: discord.Interaction, text: str):
     await interaction.followup.send(f"✅ Broadcast complete! Sent: `{success_count}` | Failed: `{fail_count}`", ephemeral=True)
 
 @bot.tree.command(name="send_online", description="Broadcast message to online members only (Bot Owner only)")
-@app_commands.describe(text="Message content to broadcast")
+@app_commands.describe(text="Message content to broadcast (use [user] for mention)")
 async def send_online(interaction: discord.Interaction, text: str):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
@@ -592,7 +593,8 @@ async def send_online(interaction: discord.Interaction, text: str):
         if member.bot or member.status == discord.Status.offline:
             continue
         try:
-            await member.send(text)
+            personalized_text = text.replace("[user]", member.mention)
+            await member.send(personalized_text)
             success_count += 1
             await asyncio.sleep(3.5)
         except:
@@ -634,7 +636,7 @@ async def protection_list(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================================
-# HELP & COMMANDS MENU (/commands)
+# HELP & COMMANDS MENU (/commands & !help)
 # =========================================
 
 @bot.command(name="help")
@@ -644,22 +646,8 @@ async def help_command(ctx):
 
 @bot.tree.command(name="commands", description="Display Sayanzi bot commands info")
 async def commands_list(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="Sayanzi Bot Commands",
-        description="All Sayanzi bot commands, including invite link and support, are available. For more information, visit our server or use the help menu.",
-        color=COLOR
-    )
-    embed.add_field(name="Invite Bot", value=f"[Click Here]({BOT_INVITE})", inline=True)
-    embed.add_field(name="Support Server", value=f"[Click Here]({SUPPORT_INVITE})", inline=True)
-    embed.add_field(
-        name="📖 Command Categories",
-        value=(
-            "**👥 All Member:** `!xp`, `!level`, `!t`, `!i`, `!عضو`, `!افاتار`, `!سيرفر`, `!اقتراح`, `!mafia`, `!chairs`\n"
-            "**👑 Staff Member:** `!تحذير`, `!لاتحذير`, `!سجل`, `!clear`, `!قف`, `!فت`, `/ban`, `/timeout`, `/add_role`, `/badword`, `/welcom_join`"
-        ),
-        inline=False
-    )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    embed = discord.Embed(title="Sayanzi bot", description="Access all essential bot commands from here.", color=COLOR)
+    await interaction.response.send_message(embed=embed, view=HelpView(), ephemeral=True)
 
 # =========================================
 # XP, LEVEL, TOP, PROFILE, INFO COMMANDS
@@ -764,28 +752,6 @@ async def server_info(ctx):
 # MODERATION COMMANDS (Text)
 # =========================================
 
-@bot.command(name="تحذير")
-async def warn(ctx, member: discord.Member):
-    if not is_admin(ctx.author, ctx.guild):
-        return await ctx.send("❌ You lack permissions!")
-    gid = str(ctx.guild.id)
-    uid = str(member.id)
-    cur.execute("SELECT warns FROM warns WHERE guild_id=? AND user_id=?", (gid, uid))
-    if cur.fetchone():
-        cur.execute("UPDATE warns SET warns=warns+1 WHERE guild_id=? AND user_id=?", (gid, uid))
-    else:
-        cur.execute("INSERT INTO warns VALUES(?,?,?)", (gid, uid, 1))
-    db.commit()
-    await ctx.send(f"⚠ {member.mention} has been warned.")
-
-@bot.command(name="لاتحذير")
-async def unwarn(ctx, member: discord.Member):
-    if not is_admin(ctx.author, ctx.guild):
-        return await ctx.send("❌ You lack permissions!")
-    cur.execute("UPDATE warns SET warns = CASE WHEN warns > 0 THEN warns - 1 ELSE 0 END WHERE guild_id=? AND user_id=?", (str(ctx.guild.id), str(member.id)))
-    db.commit()
-    await ctx.send(f"✅ Warning removed from {member.mention}.")
-
 @bot.command(name="سجل")
 async def records_command(ctx, member: discord.Member = None):
     member = member or ctx.author
@@ -804,24 +770,6 @@ async def clear(ctx, amount: int):
         await msg.delete()
     except:
         pass
-
-@bot.command(name="قف")
-async def lock(ctx):
-    if not is_admin(ctx.author, ctx.guild):
-        return await ctx.send("❌ You lack permissions!")
-    overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-    overwrite.send_messages = False
-    await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-    await ctx.send("🔒 Channel locked.")
-
-@bot.command(name="فت")
-async def unlock(ctx):
-    if not is_admin(ctx.author, ctx.guild):
-        return await ctx.send("❌ You lack permissions!")
-    overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-    overwrite.send_messages = True
-    await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-    await ctx.send("🔓 Channel unlocked.")
 
 # =========================================
 # ADMIN SLASH COMMANDS
@@ -844,6 +792,50 @@ async def unban(interaction: discord.Interaction, user_id: str):
         await interaction.response.send_message("✅ User unbanned.")
     except Exception as e:
         await interaction.response.send_message(f"❌ Error:\n`{e}`", ephemeral=True)
+
+@bot.tree.command(name="unwarn", description="Warn a member or remove warning")
+@app_commands.describe(member="Member to warn", action="Choose whether to add or remove a warning")
+@app_commands.choices(action=[
+    app_commands.Choice(name="Add Warn", value="add"),
+    app_commands.Choice(name="Remove Warn", value="remove")
+])
+async def unwarn(interaction: discord.Interaction, member: discord.Member, action: str = "remove"):
+    if not is_admin(interaction):
+        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
+    
+    gid = str(interaction.guild.id)
+    uid = str(member.id)
+    
+    if action == "add":
+        cur.execute("SELECT warns FROM warns WHERE guild_id=? AND user_id=?", (gid, uid))
+        if cur.fetchone():
+            cur.execute("UPDATE warns SET warns=warns+1 WHERE guild_id=? AND user_id=?", (gid, uid))
+        else:
+            cur.execute("INSERT INTO warns VALUES(?,?,?)", (gid, uid, 1))
+        db.commit()
+        await interaction.response.send_message(f"⚠️ {member.mention} has been warned.", ephemeral=True)
+    else:
+        cur.execute("UPDATE warns SET warns = CASE WHEN warns > 0 THEN warns - 1 ELSE 0 END WHERE guild_id=? AND user_id=?", (gid, uid))
+        db.commit()
+        await interaction.response.send_message(f"✅ Warning removed from {member.mention}.", ephemeral=True)
+
+@bot.tree.command(name="lock", description="Lock the current channel")
+async def lock_slash(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
+    overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
+    overwrite.send_messages = False
+    await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+    await interaction.response.send_message("🔒 Channel locked successfully.")
+
+@bot.tree.command(name="open", description="Unlock the current channel")
+async def open_slash(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
+    overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
+    overwrite.send_messages = True
+    await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
+    await interaction.response.send_message("🔓 Channel unlocked successfully.")
 
 @bot.tree.command(name="timeout", description="Timeout a member for a specified duration")
 async def timeout(interaction: discord.Interaction, member: discord.Member, time: str):
