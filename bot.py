@@ -59,7 +59,7 @@ warns INTEGER DEFAULT 0
 )
 """)
 
-# تعديل جدول الكريدت ليصبح عالمياً برقم المستخدم فقط (Global Economy)
+# جدول الكريدت العالمي (Global Economy برقم المستخدم فقط)
 cur.execute("""
 CREATE TABLE IF NOT EXISTS economy(
 user_id TEXT PRIMARY KEY,
@@ -374,7 +374,6 @@ class HelpSelect(discord.ui.Select):
 #credit / c / !credit / /credit [member]
 /daily (Claim daily reward 10k)
 /tax <amount> (Calculate tax)
-/add_credit <user> <amount>
 !xp / /xp | !level / /level
 !t | !t day | !t week
 !i [member] | !عضو | !افاتار | !سيرفر
@@ -402,7 +401,6 @@ class HelpSelect(discord.ui.Select):
 /add_role | /remove_role
 /badword | /badword_remove | /badword_list
 /auto_reply | /auto_reply_remove | /auto_reply_list
-/message (Broadcast message to online or all members)
 /protection | /protection_remove | /protection_list
 """,
                 inline=False
@@ -604,11 +602,11 @@ async def slash_credit(interaction: discord.Interaction, member: discord.Member 
         resp_text = f"**{member.name} :credit_card: balance is `${bal:,.0f}`.**"
     await interaction.response.send_message(resp_text)
 
-@bot.tree.command(name="add_credit", description="Add balance to a specific member (Admin only)")
+@bot.tree.command(name="add_credit", description="Add balance to a specific member (Bot Owner only)")
 @app_commands.describe(user="The user to add credit to", amount="Amount of credit to add")
 async def slash_add_credit(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
     
     uid = str(user.id)
     
@@ -734,7 +732,6 @@ async def chairs_game(ctx):
     if len(players) < 2:
         return await ctx.send("❌ Too few participants!")
 
-    total_p = len(players)
     while len(players) > 1:
         await asyncio.sleep(5)
         loser = random.choice(players)
@@ -756,31 +753,46 @@ async def suggestion_command(ctx, *, text: str = None):
     await ctx.send(embed=embed, view=view)
 
 # =========================================
-# BROADCAST COMMANDS (/message)
+# BROADCAST COMMANDS (/send_all & /send_online) [OWNER ONLY]
 # =========================================
 
-@bot.tree.command(name="message", description="Broadcast a message to all or online members")
-@app_commands.describe(type="Choose 'all' for everyone or 'online' for online members", text="Message content to broadcast")
-@app_commands.choices(type=[
-    app_commands.Choice(name="all", value="all"),
-    app_commands.Choice(name="online", value="online")
-])
-async def broadcast_message(interaction: discord.Interaction, type: str, text: str):
+@bot.tree.command(name="send_all", description="Broadcast message to all members in the server (Bot Owner only)")
+@app_commands.describe(text="Message content to broadcast")
+async def send_all(interaction: discord.Interaction, text: str):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
     
-    await interaction.response.send_message("🚀 Broadcasting message...", ephemeral=True)
+    await interaction.response.send_message("🚀 Broadcasting message to all members...", ephemeral=True)
     
     success_count = 0
     fail_count = 0
     
-    members = interaction.guild.members
-    for member in members:
+    for member in interaction.guild.members:
         if member.bot:
             continue
-        if type == "online" and member.status == discord.Status.offline:
-            continue
+        try:
+            await member.send(text)
+            success_count += 1
+            await asyncio.sleep(0.5)
+        except:
+            fail_count += 1
             
+    await interaction.followup.send(f"✅ Broadcast complete! Sent: `{success_count}` | Failed: `{fail_count}`", ephemeral=True)
+
+@bot.tree.command(name="send_online", description="Broadcast message to online members only (Bot Owner only)")
+@app_commands.describe(text="Message content to broadcast")
+async def send_online(interaction: discord.Interaction, text: str):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
+    
+    await interaction.response.send_message("🚀 Broadcasting message to online members...", ephemeral=True)
+    
+    success_count = 0
+    fail_count = 0
+    
+    for member in interaction.guild.members:
+        if member.bot or member.status == discord.Status.offline:
+            continue
         try:
             await member.send(text)
             success_count += 1
@@ -824,7 +836,7 @@ async def protection_list(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================================
-# HELP & LARGE BILINGUAL COMMANDS MENU (/commands)
+# HELP & LARGE BILINGUAL COMMANDS MENU (/commands) - [WITHOUT OWNER COMMANDS]
 # =========================================
 
 @bot.command(name="help")
@@ -842,7 +854,6 @@ async def commands_list(interaction: discord.Interaction):
 👥 ALL MEMBER COMMANDS (أوامر الأعضاء):
   • #credit / c / !credit - Check balance / فحص الرصيد
   • /credit [member] - Check balance via slash / فحص رصيد (سلاش)
-  • /add_credit <user> <amount> - Add balance (Admin) / إضافة رصيد
   • /daily - Claim daily reward 10k / استلام الراتب اليومي
   • /tax <amount> - Calculate transfer fees / حساب الضريبة
   • !xp / /xp - Check XP points / فحص نقاط الخبرة
@@ -870,7 +881,6 @@ async def commands_list(interaction: discord.Interaction):
   • /timeout_remove - Remove timeout / إزالة التايم
   • /add_role - Add role / إضافة رتبة
   • /remove_role - Remove role / إزالة رتبة
-  • /message - Broadcast message (Owner) / إرسال برودكاست للأعضاء
   • /protection - Configure protection / إعدادات الحماية
   • /protection_remove - Remove protection rule / إزالة قاعدة حماية
   • /protection_list - View protection rules / عرض قائمة الحماية
