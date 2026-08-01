@@ -28,7 +28,7 @@ BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348
 intents = discord.Intents.all()
 
 bot = commands.Bot(
-    command_prefix=["!", "#", "c."],
+    command_prefix=["!", "#"],
     intents=intents,
     case_insensitive=True,
     help_command=None
@@ -56,14 +56,6 @@ CREATE TABLE IF NOT EXISTS warns(
 guild_id TEXT,
 user_id TEXT,
 warns INTEGER DEFAULT 0
-)
-""")
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS economy(
-user_id TEXT PRIMARY KEY,
-balance REAL DEFAULT 0,
-last_daily REAL DEFAULT 0
 )
 """)
 
@@ -179,78 +171,6 @@ def parse_time(t):
         return None
 
 # =========================================
-# PROBOT STYLE CAPTCHA VIEW FOR TRANSFERS
-# =========================================
-
-class TransferCaptchaModal(discord.ui.Modal, title="Transfer Confirmation"):
-    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str):
-        super().__init__()
-        self.sender = sender
-        self.recipient = recipient
-        self.amount = amount
-        self.tax = tax
-        self.net_amount = net_amount
-        self.expected_code = expected_code
-
-        self.code_input = discord.ui.TextInput(
-            label="Type the numbers shown in the image to confirm",
-            placeholder="Type numbers here...",
-            min_length=4,
-            max_length=6,
-            required=True
-        )
-        self.add_item(self.code_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if interaction.user.id != self.sender.id:
-            return await interaction.response.send_message("❌ This menu is not for you!", ephemeral=True)
-
-        user_input = self.code_input.value.strip()
-        if user_input != self.expected_code:
-            return await interaction.response.send_message("❌ Incorrect numbers, transfer cancelled.", ephemeral=True)
-
-        uid = str(self.sender.id)
-        r_uid = str(self.recipient.id)
-
-        cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
-        s_row = cur.fetchone()
-        s_bal = s_row[0] if s_row else 0.0
-
-        if s_bal < self.amount:
-            return await interaction.response.send_message(f"❌ You do not have enough balance! Current balance: **`${s_bal:,.0f}`**", ephemeral=True)
-
-        cur.execute("UPDATE economy SET balance = balance - ? WHERE user_id=?", (self.amount, uid))
-        
-        cur.execute("SELECT balance FROM economy WHERE user_id=?", (r_uid,))
-        r_row = cur.fetchone()
-        if r_row:
-            cur.execute("UPDATE economy SET balance = balance + ? WHERE user_id=?", (self.net_amount, r_uid))
-        else:
-            cur.execute("INSERT INTO economy VALUES(?,?,?)", (r_uid, self.net_amount, 0))
-        db.commit()
-
-        success_text = f"💰 | **{self.sender.name}, has transferred `${self.net_amount:,.0f}` to {self.recipient.name}**"
-        await interaction.response.send_message(success_text)
-
-
-class TransferConfirmView(discord.ui.View):
-    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str):
-        super().__init__(timeout=60)
-        self.sender = sender
-        self.recipient = recipient
-        self.amount = amount
-        self.tax = tax
-        self.net_amount = net_amount
-        self.expected_code = expected_code
-
-    @discord.ui.button(label="Confirm Transfer 🔢", style=discord.ButtonStyle.green)
-    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.sender.id:
-            return await interaction.response.send_message("❌ Button not assigned to you!", ephemeral=True)
-        modal = TransferCaptchaModal(self.sender, self.recipient, self.amount, self.tax, self.net_amount, self.expected_code)
-        await interaction.response.send_modal(modal)
-
-# =========================================
 # GAMES VIEWS (MAFIA & CHAIRS)
 # =========================================
 
@@ -355,7 +275,7 @@ class SuggestionView(discord.ui.View):
 class HelpSelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="All member", description="Member commands, economy, and games", emoji="👥"),
+            discord.SelectOption(label="All member", description="Member commands, XP, and games", emoji="👥"),
             discord.SelectOption(label="Staff member", description="Administration and security commands", emoji="👑")
         ]
         super().__init__(placeholder="Select desired category", options=options, custom_id="help_select")
@@ -364,20 +284,18 @@ class HelpSelect(discord.ui.Select):
         if self.values[0] == "All member":
             embed = discord.Embed(
                 title="👥 All Member Commands",
-                description="List of general commands, economy, XP, and games:",
+                description="List of general commands, XP, and games:",
                 color=COLOR
             )
             embed.add_field(
-                name="💰 Economy & General",
+                name="📌 General & Games",
                 value="""
-#credit / c / !credit / /credit [member]
-/daily (Claim daily reward 10k)
-/tax <amount> (Calculate tax)
 !xp / /xp | !level / /level
 !t | !t day | !t week
 !i [member] | !عضو | !افاتار | !سيرفر
 !اقتراح <suggestion>
 !mafia | !mafia_hint | !chairs
+/commands
 """,
                 inline=False
             )
@@ -401,6 +319,7 @@ class HelpSelect(discord.ui.Select):
 /badword | /badword_remove | /badword_list
 /auto_reply | /auto_reply_remove | /auto_reply_list
 /protection | /protection_remove | /protection_list
+/welcom_join
 """,
                 inline=False
             )
@@ -478,7 +397,7 @@ async def on_member_join(member):
                 break
 
 # =========================================
-# MESSAGE EVENT (XP, AUTO REPLY, BADWORD, ANTI SPAM & LINKS, CREDIT PREFIX)
+# MESSAGE EVENT (XP, AUTO REPLY, BADWORD, ANTI SPAM & LINKS)
 # =========================================
 
 @bot.event
@@ -496,52 +415,6 @@ async def on_message(message):
     else:
         cur.execute("INSERT INTO xp VALUES(?,?,?,?,?)", (gid, uid, 1, 1, 1))
     db.commit()
-
-    # Credit Text Commands: #credit, c, !credit (GLOBAL / مشترك بكل السيرفرات)
-    content = message.content.strip()
-    if content.startswith(("#credit", "c", "!credit")) or content == "c":
-        parts = content.split()
-        
-        if len(parts) == 1 or (len(parts) == 2 and parts[1].startswith("<@")):
-            target = message.mentions[0] if message.mentions else message.author
-            t_uid = str(target.id)
-            cur.execute("SELECT balance FROM economy WHERE user_id=?", (t_uid,))
-            row = cur.fetchone()
-            bal = row[0] if row else 0.0
-            
-            if len(parts) == 1 and not message.mentions:
-                resp_text = f":bank: | **{message.author.name}, your account balance is `${bal:,.0f}`.**"
-            else:
-                resp_text = f"**{target.name} :credit_card: balance is `${bal:,.0f}`.**"
-            return await message.channel.send(resp_text)
-        
-        elif len(parts) >= 3 and message.mentions:
-            recipient = message.mentions[0]
-            if recipient.id == message.author.id:
-                return await message.channel.send("❌ You cannot transfer credits to yourself!")
-            try:
-                raw_amount = float(parts[2])
-            except:
-                return await message.channel.send("❌ Please enter a valid transfer amount!")
-            
-            if raw_amount <= 0:
-                return await message.channel.send("❌ Amount must be greater than zero!")
-
-            tax = 0
-            net_amount = raw_amount - tax
-
-            cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
-            s_row = cur.fetchone()
-            s_bal = s_row[0] if s_row else 0.0
-
-            if s_bal < raw_amount:
-                return await message.channel.send(f"❌ You do not have enough balance! Current balance: **`${s_bal:,.0f}`**")
-
-            expected_code = str(random.randint(1000, 9999))
-            
-            transfer_msg = f"**{message.author.name}, Transfer Fees: `{tax}`, Amount :`${raw_amount:,.0f}`**\n **type these numbers to confirm : `{expected_code}`**"
-            view = TransferConfirmView(message.author, recipient, raw_amount, tax, net_amount, expected_code)
-            return await message.channel.send(transfer_msg, view=view)
 
     # Auto Reply
     for trigger, reply in auto_replies.items():
@@ -582,80 +455,6 @@ async def on_message(message):
         spam_cache[key] = []
 
     await bot.process_commands(message)
-
-# =========================================
-# ECONOMY & TAX SLASH COMMANDS (GLOBAL)
-# =========================================
-
-@bot.tree.command(name="credit", description="Check your balance or another member's balance")
-async def slash_credit(interaction: discord.Interaction, member: discord.Member = None):
-    member = member or interaction.user
-    uid = str(member.id)
-    cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
-    row = cur.fetchone()
-    bal = row[0] if row else 0.0
-    
-    if member.id == interaction.user.id:
-        resp_text = f":bank: | **{member.name}, your account balance is `${bal:,.0f}`.**"
-    else:
-        resp_text = f"**{member.name} :credit_card: balance is `${bal:,.0f}`.**"
-    await interaction.response.send_message(resp_text)
-
-@bot.tree.command(name="add_credit", description="Add balance to a specific member (Bot Owner only)")
-@app_commands.describe(user="The user to add credit to", amount="Amount of credit to add")
-async def slash_add_credit(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
-    
-    uid = str(user.id)
-    
-    cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE economy SET balance = balance + ? WHERE user_id=?", (float(amount), uid))
-    else:
-        cur.execute("INSERT INTO economy VALUES (?, ?, ?)", (uid, float(amount), 0.0))
-    db.commit()
-    
-    await interaction.response.send_message(f"✅ Successfully added **{amount:,}** credits to {user.mention}!")
-
-@bot.tree.command(name="daily", description="Claim your daily reward (10,000 credits)")
-async def slash_daily(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    current_time = time.time()
-    
-    cur.execute("SELECT last_daily FROM economy WHERE user_id=?", (uid,))
-    row = cur.fetchone()
-    
-    if row and current_time - row[0] < 86400:
-        remaining = int(86400 - (current_time - row[0]))
-        hours = remaining // 3600
-        minutes = (remaining % 3600) // 60
-        return await interaction.response.send_message(f"⏳ You have already claimed your daily reward! You can claim again in `{hours} hours and {minutes} minutes`.", ephemeral=True)
-    
-    daily_amount = 10000.0
-    if row:
-        cur.execute("UPDATE economy SET balance = balance + ?, last_daily = ? WHERE user_id=?", (daily_amount, current_time, uid))
-    else:
-        cur.execute("INSERT INTO economy VALUES(?,?,?)", (uid, daily_amount, current_time))
-    db.commit()
-    
-    embed = discord.Embed(description=f"🎁 **Daily reward deposited successfully!**\nYou received: **`${daily_amount:,.0f}`**", color=COLOR)
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="tax", description="Calculate transfer tax (5% rate)")
-@app_commands.describe(amount="Amount to transfer")
-async def slash_tax(interaction: discord.Interaction, amount: float):
-    tax = amount * 0.05
-    net = amount - tax
-    transfer_amount = amount / 0.95
-    
-    embed = discord.Embed(title="🧮 Bot Tax Calculator", color=COLOR)
-    embed.add_field(name="Requested Amount", value=f"`{amount:,.0f}`", inline=False)
-    embed.add_field(name="Tax Fee (5%)", value=f"`{tax:,.0f}`", inline=False)
-    embed.add_field(name="Net Amount Received", value=f"**`${net:,.0f}`**", inline=False)
-    embed.add_field(name="Type this command to deliver exact amount", value=f"`!credit @user {transfer_amount:,.2f}`", inline=False)
-    await interaction.response.send_message(embed=embed)
 
 # =========================================
 # WELCOME COMMAND (/welcom_join)
@@ -835,7 +634,7 @@ async def protection_list(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================================
-# HELP & LARGE BILINGUAL COMMANDS MENU (/commands) - [WITHOUT OWNER COMMANDS]
+# HELP & COMMANDS MENU (/commands)
 # =========================================
 
 @bot.command(name="help")
@@ -843,57 +642,24 @@ async def help_command(ctx):
     embed = discord.Embed(title="Sayanzi bot", description="Access all essential bot commands from here.", color=COLOR)
     await ctx.send(embed=embed, view=HelpView())
 
-@bot.tree.command(name="commands", description="Display Sayanzi bot commands menu / عرض أوامر بوت سايانزي")
+@bot.tree.command(name="commands", description="Display Sayanzi bot commands info")
 async def commands_list(interaction: discord.Interaction):
-    large_commands_text = """```text
-==================================================
-        🤖 SAYANZI BOT COMMANDS / أوامر بوت سايانزي
-==================================================
-
-👥 ALL MEMBER COMMANDS (أوامر الأعضاء):
-  • #credit / c / !credit - Check balance / فحص الرصيد
-  • /credit [member] - Check balance via slash / فحص رصيد (سلاش)
-  • /daily - Claim daily reward 10k / استلام الراتب اليومي
-  • /tax <amount> - Calculate transfer fees / حساب الضريبة
-  • !xp / /xp - Check XP points / فحص نقاط الخبرة
-  • !level / /level - Check current level / فحص المستوى الحالي
-  • !t / !t day / !t week - Leaderboard rankings / لوحة الترتيب
-  • !i [member] - Detailed profile info / عرض الملف الشخصي
-  • !عضو - Quick member info / معلومات العضو السريعة
-  • !افاتار - View avatar / عرض صورة الحساب
-  • !سيرفر - Server information / معلومات السيرفر
-  • !اقتراح <text> - Create suggestion / طرح اقتراح مع أزرار
-  • !mafia - Join mafia game / الانضمام للمافيا
-  • !mafia_hint - Mafia hint (Premium) / تلميح المافيا (بريميوم)
-  • !chairs - Musical chairs game / لعبة الكراسي
-
-👑 STAFF MEMBER COMMANDS (أوامر الإدارة):
-  • !تحذير @member - Warn member / تحذير عضو
-  • !لاتحذير @member - Remove warning / إزالة تحذير
-  • !سجل @member - View warning records / سجل التحذيرات
-  • !clear <number> / !مسح <number> - Purge messages / مسح الرسائل
-  • !قف - Lock channel / قفل الشات
-  • !فت - Unlock channel / فتح الشات
-  • /ban - Ban member / حظر عضو
-  • /unban - Unban user by ID / إلغاء حظر بالآيدي
-  • /timeout - Timeout member / إعطاء تايم لعضو
-  • /timeout_remove - Remove timeout / إزالة التايم
-  • /add_role - Add role / إضافة رتبة
-  • /remove_role - Remove role / إزالة رتبة
-  • /protection - Configure protection / إعدادات الحماية
-  • /protection_remove - Remove protection rule / إزالة قاعدة حماية
-  • /protection_list - View protection rules / عرض قائمة الحماية
-  • /badword - Banned protection word / إضافة كلمة محظورة
-  • /badword_remove - Remove banned word / إزالة كلمة محظورة
-  • /badword_list - Banned words list / قائمة الكلمات المحظورة
-  • /auto_reply - Automatic word reply / إضافة رد تلقائي
-  • /auto_reply_remove - Remove auto-reply / إزالة رد تلقائي
-  • /auto_reply_list - Auto-replies list / قائمة الردود التلقائية
-  • /welcom_join - Set welcome message / ضبط رسالة الترحيب
-
-==================================================
-```"""
-    await interaction.response.send_message(large_commands_text, ephemeral=True)
+    embed = discord.Embed(
+        title="Sayanzi Bot Commands",
+        description="All Sayanzi bot commands, including invite link and support, are available. For more information, visit our server or use the help menu.",
+        color=COLOR
+    )
+    embed.add_field(name="Invite Bot", value=f"[Click Here]({BOT_INVITE})", inline=True)
+    embed.add_field(name="Support Server", value=f"[Click Here]({SUPPORT_INVITE})", inline=True)
+    embed.add_field(
+        name="📖 Command Categories",
+        value=(
+            "**👥 All Member:** `!xp`, `!level`, `!t`, `!i`, `!عضو`, `!افاتار`, `!سيرفر`, `!اقتراح`, `!mafia`, `!chairs`\n"
+            "**👑 Staff Member:** `!تحذير`, `!لاتحذير`, `!سجل`, `!clear`, `!قف`, `!فت`, `/ban`, `/timeout`, `/add_role`, `/badword`, `/welcom_join`"
+        ),
+        inline=False
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # =========================================
 # XP, LEVEL, TOP, PROFILE, INFO COMMANDS
