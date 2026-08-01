@@ -59,13 +59,12 @@ warns INTEGER DEFAULT 0
 )
 """)
 
+# تعديل جدول الكريدت ليصبح عالمياً برقم المستخدم فقط (Global Economy)
 cur.execute("""
 CREATE TABLE IF NOT EXISTS economy(
-guild_id TEXT,
-user_id TEXT,
+user_id TEXT PRIMARY KEY,
 balance REAL DEFAULT 0,
-last_daily REAL DEFAULT 0,
-PRIMARY KEY (guild_id, user_id)
+last_daily REAL DEFAULT 0
 )
 """)
 
@@ -185,7 +184,7 @@ def parse_time(t):
 # =========================================
 
 class TransferCaptchaModal(discord.ui.Modal, title="Transfer Confirmation"):
-    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str, guild_id: str):
+    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str):
         super().__init__()
         self.sender = sender
         self.recipient = recipient
@@ -193,7 +192,6 @@ class TransferCaptchaModal(discord.ui.Modal, title="Transfer Confirmation"):
         self.tax = tax
         self.net_amount = net_amount
         self.expected_code = expected_code
-        self.guild_id = guild_id
 
         self.code_input = discord.ui.TextInput(
             label="Type the numbers shown in the image to confirm",
@@ -212,25 +210,24 @@ class TransferCaptchaModal(discord.ui.Modal, title="Transfer Confirmation"):
         if user_input != self.expected_code:
             return await interaction.response.send_message("❌ Incorrect numbers, transfer cancelled.", ephemeral=True)
 
-        gid = self.guild_id
         uid = str(self.sender.id)
         r_uid = str(self.recipient.id)
 
-        cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, uid))
+        cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
         s_row = cur.fetchone()
         s_bal = s_row[0] if s_row else 0.0
 
         if s_bal < self.amount:
             return await interaction.response.send_message(f"❌ You do not have enough balance! Current balance: **`${s_bal:,.0f}`**", ephemeral=True)
 
-        cur.execute("UPDATE economy SET balance = balance - ? WHERE guild_id=? AND user_id=?", (self.amount, gid, uid))
+        cur.execute("UPDATE economy SET balance = balance - ? WHERE user_id=?", (self.amount, uid))
         
-        cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, r_uid))
+        cur.execute("SELECT balance FROM economy WHERE user_id=?", (r_uid,))
         r_row = cur.fetchone()
         if r_row:
-            cur.execute("UPDATE economy SET balance = balance + ? WHERE guild_id=? AND user_id=?", (self.net_amount, gid, r_uid))
+            cur.execute("UPDATE economy SET balance = balance + ? WHERE user_id=?", (self.net_amount, r_uid))
         else:
-            cur.execute("INSERT INTO economy VALUES(?,?,?,?)", (gid, r_uid, self.net_amount, 0))
+            cur.execute("INSERT INTO economy VALUES(?,?,?)", (r_uid, self.net_amount, 0))
         db.commit()
 
         success_text = f"💰 | **{self.sender.name}, has transferred `${self.net_amount:,.0f}` to {self.recipient.name}**"
@@ -238,7 +235,7 @@ class TransferCaptchaModal(discord.ui.Modal, title="Transfer Confirmation"):
 
 
 class TransferConfirmView(discord.ui.View):
-    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str, guild_id: str):
+    def __init__(self, sender: discord.Member, recipient: discord.Member, amount: float, tax: float, net_amount: float, expected_code: str):
         super().__init__(timeout=60)
         self.sender = sender
         self.recipient = recipient
@@ -246,13 +243,12 @@ class TransferConfirmView(discord.ui.View):
         self.tax = tax
         self.net_amount = net_amount
         self.expected_code = expected_code
-        self.guild_id = guild_id
 
     @discord.ui.button(label="Confirm Transfer 🔢", style=discord.ButtonStyle.green)
     async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.sender.id:
             return await interaction.response.send_message("❌ Button not assigned to you!", ephemeral=True)
-        modal = TransferCaptchaModal(self.sender, self.recipient, self.amount, self.tax, self.net_amount, self.expected_code, self.guild_id)
+        modal = TransferCaptchaModal(self.sender, self.recipient, self.amount, self.tax, self.net_amount, self.expected_code)
         await interaction.response.send_modal(modal)
 
 # =========================================
@@ -504,7 +500,7 @@ async def on_message(message):
         cur.execute("INSERT INTO xp VALUES(?,?,?,?,?)", (gid, uid, 1, 1, 1))
     db.commit()
 
-    # Credit Text Commands: #credit, c, !credit
+    # Credit Text Commands: #credit, c, !credit (GLOBAL / مشترك بكل السيرفرات)
     content = message.content.strip()
     if content.startswith(("#credit", "c", "!credit")) or content == "c":
         parts = content.split()
@@ -512,7 +508,7 @@ async def on_message(message):
         if len(parts) == 1 or (len(parts) == 2 and parts[1].startswith("<@")):
             target = message.mentions[0] if message.mentions else message.author
             t_uid = str(target.id)
-            cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, t_uid))
+            cur.execute("SELECT balance FROM economy WHERE user_id=?", (t_uid,))
             row = cur.fetchone()
             bal = row[0] if row else 0.0
             
@@ -537,7 +533,7 @@ async def on_message(message):
             tax = 0
             net_amount = raw_amount - tax
 
-            cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, uid))
+            cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
             s_row = cur.fetchone()
             s_bal = s_row[0] if s_row else 0.0
 
@@ -547,7 +543,7 @@ async def on_message(message):
             expected_code = str(random.randint(1000, 9999))
             
             transfer_msg = f"**{message.author.name}, Transfer Fees: `{tax}`, Amount :`${raw_amount:,.0f}`**\n **type these numbers to confirm : `{expected_code}`**"
-            view = TransferConfirmView(message.author, recipient, raw_amount, tax, net_amount, expected_code, gid)
+            view = TransferConfirmView(message.author, recipient, raw_amount, tax, net_amount, expected_code)
             return await message.channel.send(transfer_msg, view=view)
 
     # Auto Reply
@@ -591,15 +587,14 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================
-# ECONOMY & TAX SLASH COMMANDS
+# ECONOMY & TAX SLASH COMMANDS (GLOBAL)
 # =========================================
 
 @bot.tree.command(name="credit", description="Check your balance or another member's balance")
 async def slash_credit(interaction: discord.Interaction, member: discord.Member = None):
     member = member or interaction.user
-    gid = str(interaction.guild.id)
     uid = str(member.id)
-    cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, uid))
+    cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
     row = cur.fetchone()
     bal = row[0] if row else 0.0
     
@@ -615,26 +610,24 @@ async def slash_add_credit(interaction: discord.Interaction, user: discord.Membe
     if not is_admin(interaction):
         return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
     
-    gid = str(interaction.guild.id)
     uid = str(user.id)
     
-    cur.execute("SELECT balance FROM economy WHERE guild_id=? AND user_id=?", (gid, uid))
+    cur.execute("SELECT balance FROM economy WHERE user_id=?", (uid,))
     row = cur.fetchone()
     if row:
-        cur.execute("UPDATE economy SET balance = balance + ? WHERE guild_id=? AND user_id=?", (float(amount), gid, uid))
+        cur.execute("UPDATE economy SET balance = balance + ? WHERE user_id=?", (float(amount), uid))
     else:
-        cur.execute("INSERT INTO economy VALUES (?, ?, ?, ?)", (gid, uid, float(amount), 0.0))
+        cur.execute("INSERT INTO economy VALUES (?, ?, ?)", (uid, float(amount), 0.0))
     db.commit()
     
     await interaction.response.send_message(f"✅ Successfully added **{amount:,}** credits to {user.mention}!")
 
 @bot.tree.command(name="daily", description="Claim your daily reward (10,000 credits)")
 async def slash_daily(interaction: discord.Interaction):
-    gid = str(interaction.guild.id)
     uid = str(interaction.user.id)
     current_time = time.time()
     
-    cur.execute("SELECT last_daily FROM economy WHERE guild_id=? AND user_id=?", (gid, uid))
+    cur.execute("SELECT last_daily FROM economy WHERE user_id=?", (uid,))
     row = cur.fetchone()
     
     if row and current_time - row[0] < 86400:
@@ -645,9 +638,9 @@ async def slash_daily(interaction: discord.Interaction):
     
     daily_amount = 10000.0
     if row:
-        cur.execute("UPDATE economy SET balance = balance + ?, last_daily = ? WHERE guild_id=? AND user_id=?", (daily_amount, current_time, gid, uid))
+        cur.execute("UPDATE economy SET balance = balance + ?, last_daily = ? WHERE user_id=?", (daily_amount, current_time, uid))
     else:
-        cur.execute("INSERT INTO economy VALUES(?,?,?,?)", (gid, uid, daily_amount, current_time))
+        cur.execute("INSERT INTO economy VALUES(?,?,?)", (uid, daily_amount, current_time))
     db.commit()
     
     embed = discord.Embed(description=f"🎁 **Daily reward deposited successfully!**\nYou received: **`${daily_amount:,.0f}`**", color=COLOR)
