@@ -59,7 +59,6 @@ warns INTEGER DEFAULT 0
 )
 """)
 
-# جدول الكريدت العالمي (Global Economy برقم المستخدم فقط)
 cur.execute("""
 CREATE TABLE IF NOT EXISTS economy(
 user_id TEXT PRIMARY KEY,
@@ -753,7 +752,7 @@ async def suggestion_command(ctx, *, text: str = None):
     await ctx.send(embed=embed, view=view)
 
 # =========================================
-# BROADCAST COMMANDS (/send_all & /send_online) [OWNER ONLY]
+# BROADCAST COMMANDS (/send_all & /send_online) [OWNER ONLY] - [3.5s Delay]
 # =========================================
 
 @bot.tree.command(name="send_all", description="Broadcast message to all members in the server (Bot Owner only)")
@@ -773,7 +772,7 @@ async def send_all(interaction: discord.Interaction, text: str):
         try:
             await member.send(text)
             success_count += 1
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(3.5)
         except:
             fail_count += 1
             
@@ -796,7 +795,7 @@ async def send_online(interaction: discord.Interaction, text: str):
         try:
             await member.send(text)
             success_count += 1
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(3.5)
         except:
             fail_count += 1
             
