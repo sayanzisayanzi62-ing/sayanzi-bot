@@ -1,5 +1,5 @@
 # =========================================
-# SAYANZI FINAL BOT (ENGLISH RESPONSES & FULL FEATURES)
+# LUNEX FINAL BOT (MULTI-LANGUAGE & PERMISSIONS)
 # discord.py 2.x
 # =========================================
 
@@ -10,7 +10,6 @@ from datetime import timedelta
 import asyncio
 import sqlite3
 import time
-import random
 import io
 import os
 
@@ -20,6 +19,7 @@ COLOR = 0x8000ff
 OWNER_ID = 1446592341908652112
 SUPPORT_INVITE = "https://discord.gg/FMEXcwAvg"
 BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348&permissions=8&integration_type=0&scope=bot"
+WEBSITE_LINK = "https://lunexbot.netlify.app"
 
 # =========================================
 # BOT INTENTS SETUP
@@ -38,7 +38,7 @@ bot = commands.Bot(
 # DATABASE INITIALIZATION
 # =========================================
 
-db = sqlite3.connect("sayanzi.db")
+db = sqlite3.connect("lunex.db")
 cur = db.cursor()
 
 cur.execute("""
@@ -77,196 +77,110 @@ PRIMARY KEY (user_id, guild_id)
 """)
 
 cur.execute("""
-CREATE TABLE IF NOT EXISTS mafia_hints_usage(
-user_id TEXT,
-guild_id TEXT,
-hints_count INTEGER DEFAULT 0,
-last_reset REAL,
-PRIMARY KEY (user_id, guild_id)
-)
-""")
-
-cur.execute("""
 CREATE TABLE IF NOT EXISTS server_settings(
 guild_id TEXT PRIMARY KEY,
 t_role_id TEXT,
-admin_role_id TEXT
+admin_role_id TEXT,
+lang TEXT DEFAULT 'en'
 )
 """)
 
 db.commit()
 
 # =========================================
-# CACHE & DICTIONARIES
+# CACHE & LOCALIZATION
 # =========================================
 
 auto_replies = {}
 badword_words = {}
 spam_cache = {}
 
+locales = {
+    "en": {
+        "lang_set": "✅ Language has been set to English.",
+        "higher_bot": "❌ Their role is higher than or equal to mine!",
+        "higher_user": "❌ Their role is higher than or equal to yours!",
+        "banned": "✅ Member banned successfully.",
+        "unbanned": "✅ User unbanned.",
+        "invalid_time": "❌ Invalid time format (e.g., 10m, 1h).",
+        "timeout_applied": "✅ Timeout applied successfully.",
+        "timeout_removed": "✅ Timeout removed.",
+        "channel_locked": "🔒 Channel locked successfully.",
+        "channel_unlocked": "🔓 Channel unlocked successfully.",
+        "role_added": "✅ Role added successfully.",
+        "role_removed": "✅ Role removed successfully.",
+        "cleared": "🧹 Cleared `{}` messages.",
+        "error": "❌ Error:",
+        "help_desc": "Our bot is advanced with powerful and scientific features\nBot commands are available here\nTo learn more, visit us:\nhttps://lunexbot.netlify.app",
+        "all_member_title": "👥 All Member Commands",
+        "staff_member_title": "👑 Staff Member Commands",
+        "general_xp": "📌 General & XP",
+        "mod_sec": "🛡️ Moderation & Security"
+    },
+    "ar": {
+        "lang_set": "✅ تم تعيين لغة البوت إلى العربية.",
+        "higher_bot": "❌ رتبة هذا العضو أعلى من رتبتي أو مساوية لها!",
+        "higher_user": "❌ رتبة هذا العضو أعلى من رتبتك أو مساوية لها!",
+        "banned": "✅ تم حظر العضو بنجاح.",
+        "unbanned": "✅ تم فك الحظر عن المستخدم.",
+        "invalid_time": "❌ صيغة الوقت غير صحيحة (مثال: 10m, 1h).",
+        "timeout_applied": "✅ تم إعطاء العضو تايم أوت بنجاح.",
+        "timeout_removed": "✅ تم إزالة التايم أوت عن العضو.",
+        "channel_locked": "🔒 تم قفل القناة بنجاح.",
+        "channel_unlocked": "🔓 تم فتح القناة بنجاح.",
+        "role_added": "✅ تم إعطاء الرتبة بنجاح.",
+        "role_removed": "✅ تم سحب الرتبة بنجاح.",
+        "cleared": "🧹 تم مسح `{}` رسالة.",
+        "error": "❌ حدث خطأ:",
+        "help_desc": "بوتنا متطور باشياء قوية وعلمية\nاوامر البوت موجودة هنا\nلمعرفة المزيد زورنا\nhttps://lunexbot.netlify.app",
+        "all_member_title": "👥 أوامر الأعضاء",
+        "staff_member_title": "👑 أوامر الإدارة",
+        "general_xp": "📌 الأوامر العامة ونقاط الخبرة",
+        "mod_sec": "🛡️ الإشراف والحماية"
+    }
+}
+
+def get_lang(guild_id: str) -> str:
+    cur.execute("SELECT lang FROM server_settings WHERE guild_id=?", (str(guild_id),))
+    row = cur.fetchone()
+    if row and row[0] in locales:
+        return row[0]
+    return "en"
+
+def t(guild_id: str, key: str, *args) -> str:
+    lang = get_lang(guild_id)
+    text = locales[lang].get(key, key)
+    if args:
+        return text.format(*args)
+    return text
+
 # =========================================
 # PERMISSIONS & HIERARCHY CHECKS
 # =========================================
 
-def is_admin(interaction_or_member, guild=None):
-    if isinstance(interaction_or_member, discord.Interaction):
-        user = interaction_or_member.user
-        g = interaction_or_member.guild
-    else:
-        user = interaction_or_member
-        g = guild
-
-    if not g:
-        return False
-    
-    if user.id == g.owner_id:
-        return True
-
-    member = g.get_member(user.id)
-    if member and member.guild_permissions.administrator:
-        return True
-        
-    return False
-
-def is_user_premium(user_id, guild_id):
-    if user_id == OWNER_ID:
-        return True
-    current_time = time.time()
-    cur.execute("SELECT expiry_time FROM premium_users WHERE user_id=? AND guild_id=?", (str(user_id), str(guild_id)))
-    row = cur.fetchone()
-    if row and row[0] > current_time:
-        return True
-    return False
-
-async def check_admin_and_hierarchy(interaction: discord.Interaction, member: discord.Member = None):
-    if not is_admin(interaction):
-        await interaction.response.send_message("❌ You cannot do this, you lack Administrator permissions.", ephemeral=True)
+async def check_hierarchy(interaction: discord.Interaction, member: discord.Member):
+    gid = str(interaction.guild.id)
+    if member.top_role >= interaction.guild.me.top_role:
+        await interaction.response.send_message(t(gid, "higher_bot"), ephemeral=True)
         return False
 
-    if member:
-        if member.top_role >= interaction.guild.me.top_role:
-            await interaction.response.send_message("❌ Their role is higher than mine!", ephemeral=True)
-            return False
-
-        if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
-            await interaction.response.send_message("❌ Their role is higher than yours!", ephemeral=True)
-            return False
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message(t(gid, "higher_user"), ephemeral=True)
+        return False
 
     return True
 
-def parse_time(t):
+def parse_time(t_str):
     try:
-        value = int(t[:-1])
-        unit = t[-1].lower()
-
-        if unit == "s":
-            return value
-        elif unit == "m":
-            return value * 60
-        elif unit == "h":
-            return value * 3600
-        elif unit == "d":
-            return value * 86400
+        value = int(t_str[:-1])
+        unit = t_str[-1].lower()
+        if unit == "s": return value
+        elif unit == "m": return value * 60
+        elif unit == "h": return value * 3600
+        elif unit == "d": return value * 86400
     except:
         return None
-
-# =========================================
-# GAMES VIEWS (MAFIA & CHAIRS)
-# =========================================
-
-class MafiaView(discord.ui.View):
-    def __init__(self, guild_id):
-        super().__init__(timeout=180)
-        self.players = []
-        self.guild_id = guild_id
-
-    @discord.ui.button(label="Join 📥", style=discord.ButtonStyle.green, custom_id="mafia_join")
-    async def join_mafia(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user in self.players:
-            return await interaction.response.send_message("❌ You are already registered in the mafia game!", ephemeral=True)
-        
-        max_limit = 25 if is_user_premium(interaction.user.id, self.guild_id) else 15
-        
-        if len(self.players) >= max_limit:
-            return await interaction.response.send_message(f"❌ Sorry, maximum limit reached (`{max_limit}` players)!", ephemeral=True)
-        
-        self.players.append(interaction.user)
-        await interaction.response.send_message("✅ You have successfully registered for the mafia game!", ephemeral=True)
-
-    @discord.ui.button(label="Leave 📤", style=discord.ButtonStyle.red, custom_id="mafia_leave")
-    async def leave_mafia(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user not in self.players:
-            return await interaction.response.send_message("❌ You are not registered!", ephemeral=True)
-        
-        self.players.remove(interaction.user)
-        await interaction.response.send_message("✅ You have been removed from the registry.", ephemeral=True)
-
-    @discord.ui.button(label="Start Game 🚀", style=discord.ButtonStyle.blurple, custom_id="mafia_start")
-    async def start_mafia(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction):
-            return await interaction.response.send_message("❌ Only administrators can start the game!", ephemeral=True)
-        if len(self.players) < 4:
-            return await interaction.response.send_message("❌ There must be at least 4 players registered!", ephemeral=True)
-        
-        self.stop()
-        mentions = ", ".join([p.mention for p in self.players])
-        embed = discord.Embed(
-            title="🎮 Mafia Game Started!",
-            description=f"Participants ({len(self.players)}):\n{mentions}",
-            color=COLOR
-        )
-        await interaction.response.edit_message(embed=embed, view=None)
-
-class ChairsView(discord.ui.View):
-    def __init__(self, host, guild_id):
-        super().__init__(timeout=120)
-        self.players = []
-        self.host = host
-        self.guild_id = guild_id
-
-    @discord.ui.button(label="Sit on Chair 🪑", style=discord.ButtonStyle.green, custom_id="chair_sit")
-    async def sit_chair(self, interaction: discord.Interaction, button: discord.ui.Button):
-        max_limit = 30 if is_user_premium(interaction.user.id, self.guild_id) else 20
-        if len(self.players) >= max_limit:
-            return await interaction.response.send_message("❌ Sorry, max capacity reached!", ephemeral=True)
-
-        if interaction.user not in self.players:
-            self.players.append(interaction.user)
-            await interaction.response.send_message("🏃‍♂️ You grabbed a chair!", ephemeral=True)
-        else:
-            await interaction.response.send_message("⚠️ You are already seated!", ephemeral=True)
-
-# =========================================
-# SUGGESTION VIEW
-# =========================================
-
-class SuggestionView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.yes_voters = set()
-        self.no_voters = set()
-
-    @discord.ui.button(label="👍 Agree (0)", style=discord.ButtonStyle.green, custom_id="suggest_yes")
-    async def vote_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
-        uid = interaction.user.id
-        if uid in self.no_voters:
-            self.no_voters.remove(uid)
-        self.yes_voters.add(uid)
-        button.label = f"👍 Agree ({len(self.yes_voters)})"
-        self.children[1].label = f"👎 Disagree ({len(self.no_voters)})"
-        await interaction.response.edit_message(view=self)
-        await interaction.followup.send("✅ Vote recorded!", ephemeral=True)
-
-    @discord.ui.button(label="👎 Disagree (0)", style=discord.ButtonStyle.red, custom_id="suggest_no")
-    async def vote_no(self, interaction: discord.Interaction, button: discord.ui.Button):
-        uid = interaction.user.id
-        if uid in self.yes_voters:
-            self.yes_voters.remove(uid)
-        self.no_voters.add(uid)
-        self.children[0].label = f"👍 Agree ({len(self.yes_voters)})"
-        button.label = f"👎 Disagree ({len(self.no_voters)})"
-        await interaction.response.edit_message(view=self)
-        await interaction.followup.send("❌ Vote recorded!", ephemeral=True)
+    return None
 
 # =========================================
 # HELP MENU INTERACTIVE
@@ -275,54 +189,21 @@ class SuggestionView(discord.ui.View):
 class HelpSelect(discord.ui.Select):
     def __init__(self):
         options = [
-            discord.SelectOption(label="All member", description="Member commands, XP, and games", emoji="👥"),
+            discord.SelectOption(label="All member", description="Member commands & XP", emoji="👥"),
             discord.SelectOption(label="Staff member", description="Administration and security commands", emoji="👑")
         ]
         super().__init__(placeholder="Select desired category", options=options, custom_id="help_select")
 
     async def callback(self, interaction: discord.Interaction):
+        gid = str(interaction.guild.id)
         if self.values[0] == "All member":
-            embed = discord.Embed(
-                title="👥 All Member Commands",
-                description="List of general commands, XP, and games:",
-                color=COLOR
-            )
-            embed.add_field(
-                name="📌 General & Games",
-                value="""
-!xp / /xp | !level / /level
-!t | !t day | !t week
-!i [member] | !عضو | !افاتار | !سيرفر
-!اقتراح <suggestion>
-!mafia | !mafia_hint | !chairs
-/commands
-""",
-                inline=False
-            )
+            embed = discord.Embed(title=t(gid, "all_member_title"), color=COLOR)
+            embed.add_field(name=t(gid, "general_xp"), value="!xp / /xp | !level / /level\n!t | !t day | !t week\n!i [member] | !عضو | !افاتار | !سيرفر\n/commands", inline=False)
             await interaction.response.edit_message(embed=embed, view=HelpView())
 
         elif self.values[0] == "Staff member":
-            embed = discord.Embed(
-                title="👑 Staff Member Commands",
-                description="List of moderators, server management, and security:",
-                color=COLOR
-            )
-            embed.add_field(
-                name="🛡️ Moderation & Security",
-                value="""
-/unwarn @member | !سجل @member
-!clear <number> / !مسح <number>
-/lock | /open
-/ban | /unban
-/timeout | /timeout_remove
-/add_role | /remove_role
-/badword | /badword_remove | /badword_list
-/auto_reply | /auto_reply_remove | /auto_reply_list
-/protection | /protection_remove | /protection_list
-/welcom_join
-""",
-                inline=False
-            )
+            embed = discord.Embed(title=t(gid, "staff_member_title"), color=COLOR)
+            embed.add_field(name=t(gid, "mod_sec"), value="/language\n/unwarn @member | !سجل @member\n!clear <number> / !مسح <number>\n/lock | /open\n/ban | /unban\n/timeout | /timeout_remove\n/add_role | /remove_role\n/badword | /auto_reply | /protection | /welcom_join", inline=False)
             await interaction.response.edit_message(embed=embed, view=HelpView())
 
 class HelpView(discord.ui.View):
@@ -331,9 +212,10 @@ class HelpView(discord.ui.View):
         self.add_item(HelpSelect())
         self.add_item(discord.ui.Button(label="Add Bot", emoji="🔗", url=BOT_INVITE, style=discord.ButtonStyle.link))
         self.add_item(discord.ui.Button(label="Support", emoji="💬", url=SUPPORT_INVITE, style=discord.ButtonStyle.link))
+        self.add_item(discord.ui.Button(label="Website", emoji="🌐", url=WEBSITE_LINK, style=discord.ButtonStyle.link))
 
 # =========================================
-# BACKGROUND TASKS
+# BACKGROUND TASKS & EVENTS
 # =========================================
 
 async def check_expired_premiums():
@@ -350,20 +232,12 @@ async def check_expired_premiums():
             pass
         await asyncio.sleep(60)
 
-# =========================================
-# BOT READY EVENT
-# =========================================
-
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     bot.add_view(HelpView())
     bot.loop.create_task(check_expired_premiums())
-    print(f"✅ Sayanzi Bot Logged in as {bot.user}")
-
-# =========================================
-# WELCOME EVENT
-# =========================================
+    print(f"✅ Lunex Bot Logged in as {bot.user}")
 
 @bot.event
 async def on_member_join(member):
@@ -380,7 +254,6 @@ async def on_member_join(member):
         try:
             avatar_bytes = await member.display_avatar.read()
             file = discord.File(io.BytesIO(avatar_bytes), filename="avatar.png")
-            
             for channel in member.guild.text_channels:
                 if "welcome" in channel.name or "ترحيب" in channel.name or channel.permissions_for(member.guild.me).send_messages:
                     embed = discord.Embed(description=final_text, color=COLOR)
@@ -396,10 +269,6 @@ async def on_member_join(member):
                 await channel.send(embed=embed)
                 break
 
-# =========================================
-# MESSAGE EVENT (XP, AUTO REPLY, BADWORD, ANTI SPAM & LINKS)
-# =========================================
-
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
@@ -407,8 +276,8 @@ async def on_message(message):
 
     gid = str(message.guild.id)
     uid = str(message.author.id)
+    is_admin = message.author.guild_permissions.administrator
 
-    # XP System
     cur.execute("SELECT * FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
     if cur.fetchone():
         cur.execute("UPDATE xp SET messages=messages+1, day_count=day_count+1, week_count=week_count+1 WHERE guild_id=? AND user_id=?", (gid, uid))
@@ -416,336 +285,119 @@ async def on_message(message):
         cur.execute("INSERT INTO xp VALUES(?,?,?,?,?)", (gid, uid, 1, 1, 1))
     db.commit()
 
-    # Auto Reply
     for trigger, reply in auto_replies.items():
         if trigger in message.content.lower():
-            embed = discord.Embed(description=reply, color=COLOR)
-            await message.channel.send(embed=embed)
+            await message.channel.send(embed=discord.Embed(description=reply, color=COLOR))
 
-    # Badword Protection
-    for word, sec in badword_words.items():
-        if word in message.content.lower():
-            try:
-                await message.delete()
-                await message.author.timeout(timedelta(seconds=sec))
-                await message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words.")
-            except:
-                pass
+    if not is_admin:
+        for word, sec in badword_words.items():
+            if word in message.content.lower():
+                try:
+                    await message.delete()
+                    await message.author.timeout(timedelta(seconds=sec))
+                    await message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words.")
+                except:
+                    pass
 
-    # Anti Links
-    if "http://" in message.content.lower() or "https://" in message.content.lower():
-        if not is_admin(message.author, message.guild):
+        if "http://" in message.content.lower() or "https://" in message.content.lower():
             try:
                 await message.delete()
                 await message.channel.send(f"🚫 {message.author.mention} Links are not allowed in this server!")
             except:
                 pass
 
-    # Anti Spam
-    key = (gid, uid)
-    spam_cache[key] = spam_cache.get(key, []) + [time.time()]
-    spam_cache[key] = [t for t in spam_cache[key] if time.time() - t < 3]
+        key = (gid, uid)
+        spam_cache[key] = spam_cache.get(key, []) + [time.time()]
+        spam_cache[key] = [t_ for t_ in spam_cache[key] if time.time() - t_ < 3]
 
-    if len(spam_cache[key]) >= 5:
-        try:
-            await message.author.timeout(timedelta(minutes=10), reason="Spamming")
-            await message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming.")
-        except:
-            pass
-        spam_cache[key] = []
+        if len(spam_cache[key]) >= 5:
+            try:
+                await message.author.timeout(timedelta(minutes=10), reason="Spamming")
+                await message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming.")
+            except:
+                pass
+            spam_cache[key] = []
 
     await bot.process_commands(message)
 
 # =========================================
-# WELCOME COMMAND (/welcom_join)
+# LANGUAGE COMMAND
 # =========================================
 
-@bot.tree.command(name="welcom_join", description="Set custom welcome message with [user] and [ing]")
-@app_commands.describe(message="Welcome message (use [user] for mention and [ing] for avatar)")
+@bot.tree.command(name="language", description="Change bot language for this server")
+@app_commands.describe(lang="Choose language")
+@app_commands.choices(lang=[
+    app_commands.Choice(name="English", value="en"),
+    app_commands.Choice(name="العربية", value="ar")
+])
+@app_commands.default_permissions(manage_guild=True)
+async def set_language(interaction: discord.Interaction, lang: str):
+    gid = str(interaction.guild.id)
+    cur.execute("INSERT INTO server_settings (guild_id, lang) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET lang=?", (gid, lang, lang))
+    db.commit()
+    await interaction.response.send_message(t(gid, "lang_set"), ephemeral=True)
+
+# =========================================
+# SETTINGS & PROTECTION SLASH COMMANDS
+# =========================================
+
+@bot.tree.command(name="welcom_join", description="Set custom welcome message")
+@app_commands.default_permissions(manage_guild=True)
 async def welcom_join(interaction: discord.Interaction, message: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
-    
     gid = str(interaction.guild.id)
     cur.execute("INSERT OR REPLACE INTO welcome_settings VALUES (?, ?)", (gid, message))
     db.commit()
-    
-    embed = discord.Embed(title="✅ Welcome System Saved", description=f"**Saved Message:**\n{message}", color=COLOR)
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=discord.Embed(title="✅ Saved", description=message, color=COLOR))
 
-# =========================================
-# GAMES COMMANDS (MAFIA, CHAIRS)
-# =========================================
-
-@bot.command(name="mafia")
-async def mafia_game(ctx):
-    view = MafiaView(ctx.guild.id)
-    embed = discord.Embed(title="🕵️‍♂️ Mafia Game Registration", description="Click the **(Join 📥)** button below to participate.", color=COLOR)
-    await ctx.send(embed=embed, view=view)
-
-@bot.command(name="mafia_hint")
-async def mafia_hint(ctx):
-    if not is_user_premium(ctx.author.id, ctx.guild.id):
-        return await ctx.send("❌ This feature is exclusively for Premium subscribers!")
-
-    gid = str(ctx.guild.id)
-    uid = str(ctx.author.id)
-    current_time = time.time()
-    
-    cur.execute("SELECT hints_count, last_reset FROM mafia_hints_usage WHERE user_id=? AND guild_id=?", (uid, gid))
-    row = cur.fetchone()
-
-    hints_allowed = 5
-    if row:
-        hints_count, last_reset = row
-        if current_time - last_reset >= 86400:
-            hints_count = 0
-            last_reset = current_time
-        if hints_count >= hints_allowed:
-            return await ctx.send("❌ You have used all 5 of your allowed hints today!")
-        hints_count += 1
-        cur.execute("UPDATE mafia_hints_usage SET hints_count=?, last_reset=? WHERE user_id=? AND guild_id=?", (hints_count, last_reset, uid, gid))
-    else:
-        hints_count = 1
-        cur.execute("INSERT INTO mafia_hints_usage VALUES (?, ?, ?, ?)", (uid, gid, hints_count, current_time))
-    db.commit()
-
-    hints_pool = [
-        "💡 Mafia Hint: Watch out for contradicting statements; quiet members are often suspicious.",
-        "💡 Mafia Hint: Blending into general discussions is a common tactic for culprits.",
-        "💡 Mafia Hint: In advanced rounds, focusing on the last person's actions reveals a lot."
-    ]
-    embed = discord.Embed(title="🕵️‍♂️ Mafia Hint", description=f"{random.choice(hints_pool)}\n\n*Remaining hints today: **{hints_allowed - hints_count}***", color=COLOR)
-    await ctx.send(embed=embed)
-
-@bot.command(name="chairs")
-async def chairs_game(ctx):
-    view = ChairsView(ctx.author, ctx.guild.id)
-    embed = discord.Embed(title="🪑 Musical Chairs Game", description="Click the **(Sit on Chair 🪑)** button to join!", color=COLOR)
-    await ctx.send(embed=embed, view=view)
-    
-    await asyncio.sleep(15)
-    view.stop()
-    players = view.players
-    if len(players) < 2:
-        return await ctx.send("❌ Too few participants!")
-
-    while len(players) > 1:
-        await asyncio.sleep(5)
-        loser = random.choice(players)
-        players.remove(loser)
-        await ctx.send(f"❌ Eliminated: {loser.mention} | Remaining: `{len(players)}`")
-    await ctx.send(f"🏆 Musical Chairs Champion: {players[0].mention} 🎉")
-
-# =========================================
-# SUGGESTION COMMAND
-# =========================================
-
-@bot.command(name="اقتراح")
-async def suggestion_command(ctx, *, text: str = None):
-    if not text:
-        return await ctx.send("❌ Please write your suggestion next to the command!")
-    embed = discord.Embed(title="💡 New Suggestion", description=f"**Author:** {ctx.author.mention}\n\n{text}", color=COLOR)
-    view = SuggestionView()
-    await ctx.message.delete()
-    await ctx.send(embed=embed, view=view)
-
-# =========================================
-# BROADCAST COMMANDS (/send_all & /send_online) [OWNER ONLY] - [3.5s Delay]
-# =========================================
-
-@bot.tree.command(name="send_all", description="Broadcast message to all members in the server (Bot Owner only)")
-@app_commands.describe(text="Message content to broadcast (use [user] for mention)")
-async def send_all(interaction: discord.Interaction, text: str):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
-    
-    await interaction.response.send_message("🚀 Broadcasting message to all members...", ephemeral=True)
-    
-    success_count = 0
-    fail_count = 0
-    
-    for member in interaction.guild.members:
-        if member.bot:
-            continue
-        try:
-            personalized_text = text.replace("[user]", member.mention)
-            await member.send(personalized_text)
-            success_count += 1
-            await asyncio.sleep(3.5)
-        except:
-            fail_count += 1
-            
-    await interaction.followup.send(f"✅ Broadcast complete! Sent: `{success_count}` | Failed: `{fail_count}`", ephemeral=True)
-
-@bot.tree.command(name="send_online", description="Broadcast message to online members only (Bot Owner only)")
-@app_commands.describe(text="Message content to broadcast (use [user] for mention)")
-async def send_online(interaction: discord.Interaction, text: str):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message("❌ This command is exclusively for the Bot Owner!", ephemeral=True)
-    
-    await interaction.response.send_message("🚀 Broadcasting message to online members...", ephemeral=True)
-    
-    success_count = 0
-    fail_count = 0
-    
-    for member in interaction.guild.members:
-        if member.bot or member.status == discord.Status.offline:
-            continue
-        try:
-            personalized_text = text.replace("[user]", member.mention)
-            await member.send(personalized_text)
-            success_count += 1
-            await asyncio.sleep(3.5)
-        except:
-            fail_count += 1
-            
-    await interaction.followup.send(f"✅ Broadcast complete! Sent: `{success_count}` | Failed: `{fail_count}`", ephemeral=True)
-
-# =========================================
-# PROTECTION SYSTEM SLASH COMMANDS
-# =========================================
-
-@bot.tree.command(name="protection", description="Add or configure protection settings")
-@app_commands.describe(feature="Protection feature name (e.g., antilinks, antispam)", status="Enable or disable")
-@app_commands.choices(status=[
-    app_commands.Choice(name="Enable", value="enable"),
-    app_commands.Choice(name="Disable", value="disable")
-])
+@bot.tree.command(name="protection", description="Add protection settings")
+@app_commands.default_permissions(manage_guild=True)
 async def protection_config(interaction: discord.Interaction, feature: str, status: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
-    await interaction.response.send_message(f"✅ Protection feature `{feature}` has been set to `{status}`.", ephemeral=True)
-
-@bot.tree.command(name="protection_remove", description="Remove a protection rule or configuration")
-@app_commands.describe(feature="Protection feature name")
-async def protection_remove(interaction: discord.Interaction, feature: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
-    await interaction.response.send_message(f"✅ Protection rule `{feature}` removed successfully.", ephemeral=True)
-
-@bot.tree.command(name="protection_list", description="View active protection configurations")
-async def protection_list(interaction: discord.Interaction):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack Administrator permissions.", ephemeral=True)
-    
-    embed = discord.Embed(title="🛡️ Server Protection Status", color=COLOR)
-    embed.add_field(name="Anti Links", value="`Active`", inline=True)
-    embed.add_field(name="Anti Spam", value="`Active`", inline=True)
-    embed.add_field(name="Banned Words", value=f"`{len(badword_words)} words`", inline=True)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(f"✅ `{feature}` ➔ `{status}`", ephemeral=True)
 
 # =========================================
-# HELP & COMMANDS MENU (/commands & !help)
+# INFO, HELP & XP
 # =========================================
 
 @bot.command(name="help")
 async def help_command(ctx):
-    embed = discord.Embed(title="Sayanzi bot", description="Access all essential bot commands from here.", color=COLOR)
+    gid = str(ctx.guild.id)
+    embed = discord.Embed(title="Lunex Bot", description=t(gid, "help_desc"), color=COLOR)
     await ctx.send(embed=embed, view=HelpView())
 
-@bot.tree.command(name="commands", description="Display Sayanzi bot commands info")
+@bot.tree.command(name="commands", description="Display bot commands")
 async def commands_list(interaction: discord.Interaction):
-    embed = discord.Embed(title="Sayanzi bot", description="Access all essential bot commands from here.", color=COLOR)
+    gid = str(interaction.guild.id)
+    embed = discord.Embed(title="Lunex Bot", description=t(gid, "help_desc"), color=COLOR)
     await interaction.response.send_message(embed=embed, view=HelpView(), ephemeral=True)
-
-# =========================================
-# XP, LEVEL, TOP, PROFILE, INFO COMMANDS
-# =========================================
 
 @bot.command()
 async def xp(ctx):
-    gid = str(ctx.guild.id)
-    uid = str(ctx.author.id)
-    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
+    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (str(ctx.guild.id), str(ctx.author.id)))
     row = cur.fetchone()
     await ctx.send(embed=discord.Embed(title="⭐ XP", description=f"```{row[0] if row else 0}```", color=COLOR))
 
-@bot.tree.command(name="xp", description="Check your XP points")
-async def slash_xp(interaction: discord.Interaction):
-    gid = str(interaction.guild.id)
-    uid = str(interaction.user.id)
-    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
-    row = cur.fetchone()
-    await interaction.response.send_message(embed=discord.Embed(title="⭐ XP", description=f"```{row[0] if row else 0}```", color=COLOR))
-
 @bot.command()
 async def level(ctx):
-    gid = str(ctx.guild.id)
-    uid = str(ctx.author.id)
-    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
+    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (str(ctx.guild.id), str(ctx.author.id)))
     row = cur.fetchone()
-    amt = row[0] if row else 0
-    await ctx.send(embed=discord.Embed(title="📊 LEVEL", description=f"```{amt // 50}```", color=COLOR))
-
-@bot.tree.command(name="level", description="Check your current level")
-async def slash_level(interaction: discord.Interaction):
-    gid = str(interaction.guild.id)
-    uid = str(interaction.user.id)
-    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
-    row = cur.fetchone()
-    amt = row[0] if row else 0
-    await interaction.response.send_message(embed=discord.Embed(title="📊 LEVEL", description=f"```{amt // 50}```", color=COLOR))
-
-@bot.command(name="t")
-async def top_command(ctx, mode=None):
-    gid = str(ctx.guild.id)
-    col, title = "messages", "Months Top"
-    if mode == "day":
-        col, title = "day_count", "Top Day"
-    elif mode == "week":
-        col, title = "week_count", "Top Week"
-    cur.execute(f"SELECT user_id, {col} FROM xp WHERE guild_id=? ORDER BY {col} DESC LIMIT 10", (gid,))
-    embed = discord.Embed(title=f"🏆 {title}", color=COLOR)
-    for i, (uid, cnt) in enumerate(cur.fetchall(), start=1):
-        embed.add_field(name=f"{i}. <@{uid}>", value=f"💬 {cnt} points", inline=False)
-    await ctx.send(embed=embed)
+    await ctx.send(embed=discord.Embed(title="📊 LEVEL", description=f"```{(row[0] if row else 0) // 50}```", color=COLOR))
 
 @bot.command(name="i")
 async def profile(ctx, member: discord.Member = None):
     member = member or ctx.author
-    gid = str(ctx.guild.id)
-    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (gid, str(member.id)))
-    row = cur.fetchone()
-    msgs = row[0] if row else 0
-    
-    created_at = member.created_at.strftime("%Y-%m-%d")
-    joined_at = member.joined_at.strftime("%Y-%m-%d") if member.joined_at else "Unknown"
-    
+    cur.execute("SELECT messages FROM xp WHERE guild_id=? AND user_id=?", (str(ctx.guild.id), str(member.id)))
+    msgs = cur.fetchone()[0] if cur.fetchone() else 0
     embed = discord.Embed(title=f"Profile: {member.name}", color=COLOR)
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="🏷️ Name", value=f"`{member}`", inline=False)
     embed.add_field(name="🆔 ID", value=f"`{member.id}`", inline=False)
-    embed.add_field(name="📅 Account Created", value=f"`{created_at}`", inline=True)
-    embed.add_field(name="📥 Server Joined", value=f"`{joined_at}`", inline=True)
-    embed.add_field(name="👑 Highest Role", value=member.top_role.mention, inline=False)
-    embed.add_field(name="📊 Level / XP", value=f"Level: `{msgs // 50}` | Points: `{msgs}`", inline=False)
+    embed.add_field(name="📊 Level", value=f"`{msgs // 50}`", inline=False)
     await ctx.send(embed=embed)
 
-@bot.command(name="افاتار")
-async def avatar(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    embed = discord.Embed(title=f"Avatar: {member.name}", color=COLOR)
-    embed.set_image(url=member.display_avatar.url)
-    await ctx.send(embed=embed)
-
-@bot.command(name="عضو")
-async def member_info(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    embed = discord.Embed(title=f"Member Info: {member}", color=COLOR)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="👑 Highest Role", value=member.top_role.mention)
-    embed.add_field(name="🆔 ID", value=f"`{member.id}`")
-    await ctx.send(embed=embed)
-
-@bot.command(name="سيرفر", aliases=["server"])
+@bot.command(name="سيرفر")
 async def server_info(ctx):
-    guild = ctx.guild
-    embed = discord.Embed(title=f"🖥 Server Info: {guild.name}", color=COLOR)
-    if guild.icon:
-        embed.set_thumbnail(url=guild.icon.url)
-    embed.add_field(name="👥 Members", value=f"`{guild.member_count}`", inline=True)
-    embed.add_field(name="👑 Owner", value=f"{guild.owner.mention}", inline=True)
+    embed = discord.Embed(title=f"🖥 {ctx.guild.name}", color=COLOR)
+    if ctx.guild.icon: embed.set_thumbnail(url=ctx.guild.icon.url)
+    embed.add_field(name="👥 Members", value=f"`{ctx.guild.member_count}`")
     await ctx.send(embed=embed)
 
 # =========================================
@@ -753,6 +405,7 @@ async def server_info(ctx):
 # =========================================
 
 @bot.command(name="سجل")
+@commands.has_permissions(manage_messages=True)
 async def records_command(ctx, member: discord.Member = None):
     member = member or ctx.author
     cur.execute("SELECT warns FROM warns WHERE guild_id=? AND user_id=?", (str(ctx.guild.id), str(member.id)))
@@ -760,173 +413,102 @@ async def records_command(ctx, member: discord.Member = None):
     await ctx.send(embed=discord.Embed(title=f"📋 Records for {member.name}", description=f"⚠️ Warnings: `{row[0] if row else 0}`", color=COLOR))
 
 @bot.command(name="clear", aliases=["مسح"])
+@commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
-    if not is_admin(ctx.author, ctx.guild):
-        return await ctx.send("❌ You lack permissions!")
+    gid = str(ctx.guild.id)
     await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(f"🧹 Cleared `{amount}` messages.")
+    msg = await ctx.send(t(gid, "cleared", amount))
     await asyncio.sleep(3)
-    try:
-        await msg.delete()
-    except:
-        pass
+    try: await msg.delete()
+    except: pass
 
 # =========================================
-# ADMIN SLASH COMMANDS
+# MODERATION SLASH COMMANDS (PERMISSIONS)
 # =========================================
 
-@bot.tree.command(name="ban", description="Ban a member from the server")
+@bot.tree.command(name="ban", description="Ban a member")
+@app_commands.default_permissions(ban_members=True)
 async def ban(interaction: discord.Interaction, member: discord.Member):
-    if not await check_admin_and_hierarchy(interaction, member):
-        return
+    if not await check_hierarchy(interaction, member): return
     await member.ban()
-    await interaction.response.send_message("✅ Member banned successfully.")
+    await interaction.response.send_message(t(str(interaction.guild.id), "banned"))
 
-@bot.tree.command(name="unban", description="Unban a user by their ID")
+@bot.tree.command(name="unban", description="Unban a user by ID")
+@app_commands.default_permissions(ban_members=True)
 async def unban(interaction: discord.Interaction, user_id: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
+    gid = str(interaction.guild.id)
     try:
         user = await bot.fetch_user(int(user_id))
         await interaction.guild.unban(user)
-        await interaction.response.send_message("✅ User unbanned.")
+        await interaction.response.send_message(t(gid, "unbanned"))
     except Exception as e:
-        await interaction.response.send_message(f"❌ Error:\n`{e}`", ephemeral=True)
+        await interaction.response.send_message(f"{t(gid, 'error')} `{e}`", ephemeral=True)
 
-@bot.tree.command(name="unwarn", description="Warn a member or remove warning")
-@app_commands.describe(member="Member to warn", action="Choose whether to add or remove a warning")
-@app_commands.choices(action=[
-    app_commands.Choice(name="Add Warn", value="add"),
-    app_commands.Choice(name="Remove Warn", value="remove")
-])
-async def unwarn(interaction: discord.Interaction, member: discord.Member, action: str = "remove"):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
-    
-    gid = str(interaction.guild.id)
-    uid = str(member.id)
-    
-    if action == "add":
-        cur.execute("SELECT warns FROM warns WHERE guild_id=? AND user_id=?", (gid, uid))
-        if cur.fetchone():
-            cur.execute("UPDATE warns SET warns=warns+1 WHERE guild_id=? AND user_id=?", (gid, uid))
-        else:
-            cur.execute("INSERT INTO warns VALUES(?,?,?)", (gid, uid, 1))
-        db.commit()
-        await interaction.response.send_message(f"⚠️ {member.mention} has been warned.", ephemeral=True)
-    else:
-        cur.execute("UPDATE warns SET warns = CASE WHEN warns > 0 THEN warns - 1 ELSE 0 END WHERE guild_id=? AND user_id=?", (gid, uid))
-        db.commit()
-        await interaction.response.send_message(f"✅ Warning removed from {member.mention}.", ephemeral=True)
-
-@bot.tree.command(name="lock", description="Lock the current channel")
+@bot.tree.command(name="lock", description="Lock channel")
+@app_commands.default_permissions(manage_channels=True)
 async def lock_slash(interaction: discord.Interaction):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = False
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.response.send_message("🔒 Channel locked successfully.")
+    await interaction.response.send_message(t(str(interaction.guild.id), "channel_locked"))
 
-@bot.tree.command(name="open", description="Unlock the current channel")
+@bot.tree.command(name="open", description="Unlock channel")
+@app_commands.default_permissions(manage_channels=True)
 async def open_slash(interaction: discord.Interaction):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = True
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    await interaction.response.send_message("🔓 Channel unlocked successfully.")
+    await interaction.response.send_message(t(str(interaction.guild.id), "channel_unlocked"))
 
-@bot.tree.command(name="timeout", description="Timeout a member for a specified duration")
+@bot.tree.command(name="timeout", description="Timeout a member")
+@app_commands.default_permissions(moderate_members=True)
 async def timeout(interaction: discord.Interaction, member: discord.Member, time: str):
-    if not await check_admin_and_hierarchy(interaction, member):
-        return
+    gid = str(interaction.guild.id)
+    if not await check_hierarchy(interaction, member): return
     secs = parse_time(time)
-    if not secs:
-        return await interaction.response.send_message("❌ Invalid time format (e.g., 10m, 1h)", ephemeral=True)
+    if not secs: return await interaction.response.send_message(t(gid, "invalid_time"), ephemeral=True)
     await member.timeout(timedelta(seconds=secs))
-    await interaction.response.send_message("✅ Timeout applied successfully.")
+    await interaction.response.send_message(t(gid, "timeout_applied"))
 
-@bot.tree.command(name="timeout_remove", description="Remove timeout from a member")
+@bot.tree.command(name="timeout_remove", description="Remove timeout")
+@app_commands.default_permissions(moderate_members=True)
 async def timeout_remove(interaction: discord.Interaction, member: discord.Member):
-    if not await check_admin_and_hierarchy(interaction, member):
-        return
+    gid = str(interaction.guild.id)
+    if not await check_hierarchy(interaction, member): return
     await member.timeout(None)
-    await interaction.response.send_message("✅ Timeout removed.")
+    await interaction.response.send_message(t(gid, "timeout_removed"))
 
-@bot.tree.command(name="add_role", description="Add a role to a member")
+@bot.tree.command(name="add_role", description="Add a role")
+@app_commands.default_permissions(manage_roles=True)
 async def add_role(interaction: discord.Interaction, member: discord.Member, role: discord.Role):
-    if not await check_admin_and_hierarchy(interaction, member):
-        return
+    if not await check_hierarchy(interaction, member): return
     await member.add_roles(role)
-    await interaction.response.send_message(f"✅ Added role to {member.mention}.")
+    await interaction.response.send_message(t(str(interaction.guild.id), "role_added"))
 
-@bot.tree.command(name="remove_role", description="Remove a role from a member")
+@bot.tree.command(name="remove_role", description="Remove a role")
+@app_commands.default_permissions(manage_roles=True)
 async def remove_role(interaction: discord.Interaction, member: discord.Member, role: discord.Role):
-    if not await check_admin_and_hierarchy(interaction, member):
-        return
+    if not await check_hierarchy(interaction, member): return
     await member.remove_roles(role)
-    await interaction.response.send_message(f"✅ Removed role from {member.mention}.")
+    await interaction.response.send_message(t(str(interaction.guild.id), "role_removed"))
 
 # =========================================
-# BADWORD & AUTO-REPLY COMMANDS
+# BADWORD & AUTO-REPLY
 # =========================================
 
-@bot.tree.command(name="badword", description="Add a banned protection word with timeout duration")
-@app_commands.describe(word="Forbidden word", time="Timeout duration like 10s or 5m")
+@bot.tree.command(name="badword", description="Add banned word")
+@app_commands.default_permissions(manage_guild=True)
 async def badword(interaction: discord.Interaction, word: str, time: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
     secs = parse_time(time)
-    if not secs:
-        return await interaction.response.send_message("❌ Invalid time format", ephemeral=True)
+    if not secs: return await interaction.response.send_message(t(str(interaction.guild.id), "invalid_time"), ephemeral=True)
     badword_words[word.lower()] = secs
-    await interaction.response.send_message(f"✅ Added `{word}` to forbidden words list.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Added `{word}`", ephemeral=True)
 
-@bot.tree.command(name="badword_remove", description="Remove a word from protection list")
-async def badword_remove(interaction: discord.Interaction, word: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
-    if word.lower() in badword_words:
-        del badword_words[word.lower()]
-        await interaction.response.send_message(f"✅ Removed `{word}`.", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Word not found.", ephemeral=True)
-
-@bot.tree.command(name="badword_list", description="View banned words list")
-async def badword_list(interaction: discord.Interaction):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
-    if not badword_words:
-        return await interaction.response.send_message("📋 Banned words list is empty.", ephemeral=True)
-    lst = "\n".join([f"• `{w}` ({s}s)" for w, s in badword_words.items()])
-    await interaction.response.send_message(embed=discord.Embed(title="🛡️ Banned Words", description=lst, color=COLOR), ephemeral=True)
-
-@bot.tree.command(name="auto_reply", description="Add an automatic word reply")
+@bot.tree.command(name="auto_reply", description="Add auto reply")
+@app_commands.default_permissions(manage_guild=True)
 async def auto_reply(interaction: discord.Interaction, trigger: str, reply: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
     auto_replies[trigger.lower()] = reply
-    await interaction.response.send_message(f"✅ Added auto-reply for `{trigger}`.", ephemeral=True)
-
-@bot.tree.command(name="auto_reply_remove", description="Remove an automatic reply")
-async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
-    if trigger.lower() in auto_replies:
-        del auto_replies[trigger.lower()]
-        await interaction.response.send_message("✅ Deleted successfully.", ephemeral=True)
-    else:
-        await interaction.response.send_message("❌ Not found.", ephemeral=True)
-
-@bot.tree.command(name="auto_reply_list", description="View automatic replies list")
-async def auto_reply_list(interaction: discord.Interaction):
-    if not is_admin(interaction):
-        return await interaction.response.send_message("❌ You lack permissions.", ephemeral=True)
-    if not auto_replies:
-        return await interaction.response.send_message("📋 Auto-replies list is empty.", ephemeral=True)
-    lst = "\n".join([f"• **{t}** ➔ `{r}`" for t, r in auto_replies.items()])
-    await interaction.response.send_message(embed=discord.Embed(title="💬 Auto Replies", description=lst, color=COLOR), ephemeral=True)
+    await interaction.response.send_message(f"✅ Added auto-reply for `{trigger}`", ephemeral=True)
 
 # =========================================
 # RUN BOT
