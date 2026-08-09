@@ -109,6 +109,7 @@ locales = {
         "channel_unlocked": "🔓 Channel unlocked successfully.",
         "role_added": "✅ Role added successfully.",
         "role_removed": "✅ Role removed successfully.",
+        "nick_changed": "✅ Nickname changed successfully.",
         "cleared": "🧹 Cleared `{}` messages.",
         "error": "❌ Error:",
         "help_desc": "Our bot is advanced with powerful and scientific features\nBot commands are available here\nTo learn more, visit us:\nhttps://lunexbot.netlify.app",
@@ -130,6 +131,7 @@ locales = {
         "channel_unlocked": "🔓 تم فتح القناة بنجاح.",
         "role_added": "✅ تم إعطاء الرتبة بنجاح.",
         "role_removed": "✅ تم سحب الرتبة بنجاح.",
+        "nick_changed": "✅ تم تغيير اللقب بنجاح.",
         "cleared": "🧹 تم مسح `{}` رسالة.",
         "error": "❌ حدث خطأ:",
         "help_desc": "بوتنا متطور باشياء قوية وعلمية\nاوامر البوت موجودة هنا\nلمعرفة المزيد زورنا\nhttps://lunexbot.netlify.app",
@@ -203,7 +205,7 @@ class HelpSelect(discord.ui.Select):
 
         elif self.values[0] == "Staff member":
             embed = discord.Embed(title=t(gid, "staff_member_title"), color=COLOR)
-            embed.add_field(name=t(gid, "mod_sec"), value="/language\n/unwarn @member | !سجل @member\n!clear <number> / !مسح <number>\n/lock | /open\n/ban | /unban\n/timeout | /timeout_remove\n/add_role | /remove_role\n/badword | /auto_reply | /protection | /welcom_join", inline=False)
+            embed.add_field(name=t(gid, "mod_sec"), value="/language / /l\n/unwarn @member | !سجل @member\n!clear <number> / !مسح <number>\n/lock | /open\n/ban | /unban\n/timeout | /timeout_remove\n/add_role | /remove_role | /nickname\n/badword | /auto_reply | /protection | /welcom_join", inline=False)
             await interaction.response.edit_message(embed=embed, view=HelpView())
 
 class HelpView(discord.ui.View):
@@ -321,8 +323,14 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # =========================================
-# LANGUAGE COMMAND
+# LANGUAGE COMMANDS (/language & /l)
 # =========================================
+
+async def handle_language_setting(interaction: discord.Interaction, lang: str):
+    gid = str(interaction.guild.id)
+    cur.execute("INSERT INTO server_settings (guild_id, lang) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET lang=?", (gid, lang, lang))
+    db.commit()
+    await interaction.response.send_message(t(gid, "lang_set"), ephemeral=True)
 
 @bot.tree.command(name="language", description="Change bot language for this server")
 @app_commands.describe(lang="Choose language")
@@ -332,10 +340,17 @@ async def on_message(message):
 ])
 @app_commands.default_permissions(manage_guild=True)
 async def set_language(interaction: discord.Interaction, lang: str):
-    gid = str(interaction.guild.id)
-    cur.execute("INSERT INTO server_settings (guild_id, lang) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET lang=?", (gid, lang, lang))
-    db.commit()
-    await interaction.response.send_message(t(gid, "lang_set"), ephemeral=True)
+    await handle_language_setting(interaction, lang)
+
+@bot.tree.command(name="l", description="Change bot language (Shortcut for /language)")
+@app_commands.describe(lang="Choose language")
+@app_commands.choices(lang=[
+    app_commands.Choice(name="English", value="en"),
+    app_commands.Choice(name="العربية", value="ar")
+])
+@app_commands.default_permissions(manage_guild=True)
+async def set_language_alias(interaction: discord.Interaction, lang: str):
+    await handle_language_setting(interaction, lang)
 
 # =========================================
 # SETTINGS & PROTECTION SLASH COMMANDS
@@ -491,6 +506,18 @@ async def remove_role(interaction: discord.Interaction, member: discord.Member, 
     if not await check_hierarchy(interaction, member): return
     await member.remove_roles(role)
     await interaction.response.send_message(t(str(interaction.guild.id), "role_removed"))
+
+@bot.tree.command(name="nickname", description="Change a member's nickname")
+@app_commands.describe(member="Select member", nickname="New nickname (leave blank to reset)")
+@app_commands.default_permissions(manage_nicknames=True)
+async def nickname(interaction: discord.Interaction, member: discord.Member, nickname: str = None):
+    gid = str(interaction.guild.id)
+    if not await check_hierarchy(interaction, member): return
+    try:
+        await member.edit(nick=nickname)
+        await interaction.response.send_message(t(gid, "nick_changed"))
+    except Exception as e:
+        await interaction.response.send_message(f"{t(gid, 'error')} `{e}`", ephemeral=True)
 
 # =========================================
 # BADWORD & AUTO-REPLY
