@@ -199,13 +199,23 @@ class HelpSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         gid = str(interaction.guild.id)
         if self.values[0] == "All member":
+            all_cmds = (
+                "/xp\n!xp\n/level\n!level\n!t\n!t day\n!t week\n"
+                "!i [member]\n!عضو\n!افاتار\n!سيرفر\n/commands"
+            )
             embed = discord.Embed(title=t(gid, "all_member_title"), color=COLOR)
-            embed.add_field(name=t(gid, "general_xp"), value="!xp / /xp | !level / /level\n!t | !t day | !t week\n!i [member] | !عضو | !افاتار | !سيرفر\n/commands", inline=False)
+            embed.add_field(name=t(gid, "general_xp"), value=all_cmds, inline=False)
             await interaction.response.edit_message(embed=embed, view=HelpView())
 
         elif self.values[0] == "Staff member":
+            staff_cmds = (
+                "/language\n/l\n/unwarn\n!سجل\n!clear\n!مسح\n"
+                "/lock\n/open\n/ban\n/unban\n/timeout\n/timeout_remove\n"
+                "/add_role\n/remove_role\n/nickname\n/badword\n/auto_reply\n"
+                "/protection\n/welcom_join"
+            )
             embed = discord.Embed(title=t(gid, "staff_member_title"), color=COLOR)
-            embed.add_field(name=t(gid, "mod_sec"), value="/language / /l\n/unwarn @member | !سجل @member\n!clear <number> / !مسح <number>\n/lock | /open\n/ban | /unban\n/timeout | /timeout_remove\n/add_role | /remove_role | /nickname\n/badword | /auto_reply | /protection | /welcom_join", inline=False)
+            embed.add_field(name=t(gid, "mod_sec"), value=staff_cmds, inline=False)
             await interaction.response.edit_message(embed=embed, view=HelpView())
 
 class HelpView(discord.ui.View):
@@ -236,7 +246,12 @@ async def check_expired_premiums():
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
+        
     bot.add_view(HelpView())
     bot.loop.create_task(check_expired_premiums())
     print(f"✅ Lunex Bot Logged in as {bot.user}")
