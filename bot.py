@@ -12,6 +12,7 @@ import sqlite3
 import time
 import io
 import os
+import certifi
 
 from pymongo import MongoClient
 
@@ -31,7 +32,7 @@ SITE_URL = os.getenv("FRONTEND_URL", "https://lunexbot.netlify.app")
 # MONGODB (نفس قاعدة بيانات الموقع)
 # =========================================
 
-_mongo = MongoClient(os.environ["MONGODB_URI"])
+_mongo = MongoClient(os.environ["MONGODB_URI"], tlsCAFile=certifi.where())
 _mdb = _mongo.get_default_database()
 guild_settings = _mdb["guildsettings"]
 
@@ -411,7 +412,6 @@ async def check_expired_premiums():
 
 
 async def reset_leaderboards():
-    """يصفر التوب اليومي/الأسبوعي/الشهري تلقائيًا لما تنتهي الفترة"""
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
@@ -437,7 +437,7 @@ async def reset_leaderboards():
                 db.commit()
         except Exception as e:
             print("reset error:", e)
-        await asyncio.sleep(3600)  # يتفحص كل ساعة
+        await asyncio.sleep(3600)
 
 
 # =========================================
@@ -523,7 +523,6 @@ async def on_message(message: discord.Message):
 
     settings = get_settings(gid)
 
-    # اختصارات الأوامر المخصصة (من الموقع)
     for prefix in ("!", "#"):
         if message.content.startswith(prefix):
             rest = message.content[len(prefix):]
@@ -537,7 +536,6 @@ async def on_message(message: discord.Message):
                     message.content = new_content
                     break
 
-    # Auto Reply (من الموقع)
     content_lower = message.content.strip().lower()
     for reply_entry in settings.get("autoReplies", []):
         trigger = (reply_entry.get("message") or "").strip().lower()
