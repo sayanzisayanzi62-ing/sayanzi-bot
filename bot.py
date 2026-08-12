@@ -1,7 +1,7 @@
 # =========================================
 # LUNEX BOT — RAILWAY OPTIMIZED EDITION
 # discord.py 2.x
-# MongoDB + SQLite
+# MongoDB (Motor Async) + SQLite
 # =========================================
 
 import discord
@@ -14,7 +14,7 @@ import time
 import os
 import re
 import certifi
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient
 
 
 # =========================================
@@ -61,10 +61,10 @@ if not MONGODB_URI:
 
 
 # =========================================
-# MONGODB
+# MONGODB (ASYNC MOTOR)
 # =========================================
 
-mongo = MongoClient(
+mongo = AsyncIOMotorClient(
     MONGODB_URI,
     tlsCAFile=certifi.where(),
     serverSelectionTimeoutMS=5000,
@@ -155,7 +155,7 @@ def merge_settings(data):
     return settings
 
 
-def get_settings_sync(guild_id: str):
+async def get_settings(guild_id: str):
     now = time.time()
 
     cached = settings_cache.get(guild_id)
@@ -166,14 +166,14 @@ def get_settings_sync(guild_id: str):
         if now < expires_at:
             return data
 
-    doc = guild_settings.find_one(
+    doc = await guild_settings.find_one(
         {"guildId": guild_id}
     )
 
     if not doc:
         data = clone_defaults()
 
-        guild_settings.update_one(
+        await guild_settings.update_one(
             {"guildId": guild_id},
             {
                 "$setOnInsert": {
@@ -194,16 +194,9 @@ def get_settings_sync(guild_id: str):
     return data
 
 
-async def get_settings(guild_id: str):
-    return await asyncio.to_thread(
-        get_settings_sync,
-        guild_id
-    )
+async def update_settings(guild_id: str, update: dict):
 
-
-def update_settings_sync(guild_id: str, update: dict):
-
-    guild_settings.update_one(
+    await guild_settings.update_one(
         {"guildId": guild_id},
         {
             "$set": update,
@@ -216,15 +209,7 @@ def update_settings_sync(guild_id: str, update: dict):
 
     settings_cache.pop(guild_id, None)
 
-    return get_settings_sync(guild_id)
-
-
-async def update_settings(guild_id: str, update: dict):
-    return await asyncio.to_thread(
-        update_settings_sync,
-        guild_id,
-        update
-    )
+    return await get_settings(guild_id)
 
 
 # =========================================
@@ -1339,9 +1324,9 @@ async def on_member_remove(
 # LOAD BADWORDS
 # =========================================
 
-def load_badwords_sync(guild_id):
+async def load_badwords(guild_id):
 
-    doc = guild_settings.find_one(
+    doc = await guild_settings.find_one(
         {"guildId": str(guild_id)},
         {"badwords": 1}
     )
@@ -1362,10 +1347,7 @@ async def get_badwords(guild_id):
     if guild_id in badword_cache:
         return badword_cache[guild_id]
 
-    data = await asyncio.to_thread(
-        load_badwords_sync,
-        guild_id
-    )
+    data = await load_badwords(guild_id)
 
     badword_cache[guild_id] = data
 
@@ -2895,8 +2877,7 @@ async def badword(
         interaction.guild.id
     )
 
-    await asyncio.to_thread(
-        guild_settings.update_one,
+    await guild_settings.update_one(
         {"guildId": gid},
         {
             "$set": {
@@ -2907,7 +2888,7 @@ async def badword(
                 "guildId": gid
             }
         },
-        True
+        upsert=True
     )
 
     badword_cache.pop(
@@ -2942,8 +2923,7 @@ async def auto_reply(
         interaction.guild.id
     )
 
-    await asyncio.to_thread(
-        guild_settings.update_one,
+    await guild_settings.update_one(
         {"guildId": gid},
         {
             "$push": {
@@ -2956,7 +2936,7 @@ async def auto_reply(
                 "guildId": gid
             }
         },
-        True
+        upsert=True
     )
 
     settings_cache.pop(
@@ -2990,8 +2970,7 @@ async def auto_reply_remove(
         interaction.guild.id
     )
 
-    await asyncio.to_thread(
-        guild_settings.update_one,
+    await guild_settings.update_one(
         {"guildId": gid},
         {
             "$pull": {
