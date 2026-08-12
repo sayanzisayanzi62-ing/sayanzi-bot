@@ -442,7 +442,7 @@ async def reset_leaderboards():
 
 
 # =========================================
-# BOT READY (المزامنة تصير مرة وحدة بس، مو كل إعادة اتصال)
+# BOT READY (المزامنة تصير مرة وحدة بس)
 # =========================================
 
 @bot.event
@@ -508,7 +508,7 @@ async def on_member_remove(member: discord.Member):
 
 
 # =========================================
-# MESSAGE EVENT
+# MESSAGE EVENT (محصّنة: مهما صار خطأ، الأوامر تشتغل بالنهاية)
 # =========================================
 
 @bot.event
@@ -519,62 +519,71 @@ async def on_message(message: discord.Message):
     gid = str(message.guild.id)
     uid = str(message.author.id)
 
-    cur.execute("SELECT 1 FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
-    if cur.fetchone():
-        cur.execute("UPDATE xp SET messages=messages+1, day_count=day_count+1, week_count=week_count+1, month_count=month_count+1 WHERE guild_id=? AND user_id=?", (gid, uid))
-    else:
-        cur.execute("INSERT INTO xp (guild_id, user_id, messages, day_count, week_count, month_count) VALUES (?,?,1,1,1,1)", (gid, uid))
-    db.commit()
+    try:
+        cur.execute("SELECT 1 FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
+        if cur.fetchone():
+            cur.execute("UPDATE xp SET messages=messages+1, day_count=day_count+1, week_count=week_count+1, month_count=month_count+1 WHERE guild_id=? AND user_id=?", (gid, uid))
+        else:
+            cur.execute("INSERT INTO xp (guild_id, user_id, messages, day_count, week_count, month_count) VALUES (?,?,1,1,1,1)", (gid, uid))
+        db.commit()
+    except Exception as e:
+        print("xp update error:", e)
 
-    settings = get_settings(gid)
+    try:
+        settings = get_settings(gid)
 
-    for prefix in ("!", "#"):
-        if message.content.startswith(prefix):
-            rest = message.content[len(prefix):]
-            first_word, _, remainder = rest.partition(" ")
-            for alias_entry in settings.get("commandAliases", []):
-                if first_word == alias_entry.get("alias"):
-                    original = alias_entry.get("original")
-                    new_content = f"{prefix}{original}"
-                    if remainder:
-                        new_content += f" {remainder}"
-                    message.content = new_content
-                    break
+        for prefix in ("!", "#"):
+            if message.content.startswith(prefix):
+                rest = message.content[len(prefix):]
+                first_word, _, remainder = rest.partition(" ")
+                for alias_entry in settings.get("commandAliases", []):
+                    if first_word == alias_entry.get("alias"):
+                        original = alias_entry.get("original")
+                        new_content = f"{prefix}{original}"
+                        if remainder:
+                            new_content += f" {remainder}"
+                        message.content = new_content
+                        break
 
-    content_lower = message.content.strip().lower()
-    for reply_entry in settings.get("autoReplies", []):
-        trigger = (reply_entry.get("message") or "").strip().lower()
-        if trigger and trigger in content_lower:
-            await message.channel.send(embed=discord.Embed(description=reply_entry.get("reply", ""), color=COLOR))
-            break
+        content_lower = message.content.strip().lower()
+        for reply_entry in settings.get("autoReplies", []):
+            trigger = (reply_entry.get("message") or "").strip().lower()
+            if trigger and trigger in content_lower:
+                await message.channel.send(embed=discord.Embed(description=reply_entry.get("reply", ""), color=COLOR))
+                break
+    except Exception as e:
+        print("mongo settings error:", e)
 
-    if not message.author.guild_permissions.administrator:
-        for word, sec in badword_words.items():
-            if word in message.content.lower():
+    try:
+        if not message.author.guild_permissions.administrator:
+            for word, sec in badword_words.items():
+                if word in message.content.lower():
+                    try:
+                        await message.delete()
+                        await message.author.timeout(timedelta(seconds=sec))
+                        await message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words.")
+                    except Exception:
+                        pass
+
+            if "http://" in message.content.lower() or "https://" in message.content.lower():
                 try:
                     await message.delete()
-                    await message.author.timeout(timedelta(seconds=sec))
-                    await message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words.")
+                    await message.channel.send(f"🚫 {message.author.mention} Links are not allowed in this server!")
                 except Exception:
                     pass
 
-        if "http://" in message.content.lower() or "https://" in message.content.lower():
-            try:
-                await message.delete()
-                await message.channel.send(f"🚫 {message.author.mention} Links are not allowed in this server!")
-            except Exception:
-                pass
-
-        key = (gid, uid)
-        spam_cache[key] = spam_cache.get(key, []) + [time.time()]
-        spam_cache[key] = [t_ for t_ in spam_cache[key] if time.time() - t_ < 3]
-        if len(spam_cache[key]) >= 5:
-            try:
-                await message.author.timeout(timedelta(minutes=10), reason="Spamming")
-                await message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming.")
-            except Exception:
-                pass
-            spam_cache[key] = []
+            key = (gid, uid)
+            spam_cache[key] = spam_cache.get(key, []) + [time.time()]
+            spam_cache[key] = [t_ for t_ in spam_cache[key] if time.time() - t_ < 3]
+            if len(spam_cache[key]) >= 5:
+                try:
+                    await message.author.timeout(timedelta(minutes=10), reason="Spamming")
+                    await message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming.")
+                except Exception:
+                    pass
+                spam_cache[key] = []
+    except Exception as e:
+        print("protection error:", e)
 
     await bot.process_commands(message)
 
