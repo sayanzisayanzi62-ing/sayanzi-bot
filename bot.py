@@ -542,7 +542,8 @@ async def on_message(message: discord.Message):
                         new_content = f"{prefix}{original}"
                         if remainder:
                             new_content += f" {remainder}"
-                        message.content = new_content
+                        # تم إصلاح الخطأ البرمجي هنا (استبدال content بـ _content لتخطي مشكلة الـ Read-only في Discord.py)
+                        message._content = new_content
                         break
 
         content_lower = message.content.strip().lower()
@@ -896,6 +897,7 @@ async def auto_reply(interaction: discord.Interaction, trigger: str, reply: str)
 
 
 @bot.tree.command(name="auto_reply_remove", description="Remove an automatic reply")
+@app_commands.default_permissions(manage_guild=True) # تم إضافة صلاحية أمنية هنا حتى لا يقوم الأعضاء العاديون بمسح الردود التلقائية
 async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
     guild_settings.update_one(
         {"guildId": str(interaction.guild.id)},
@@ -910,3 +912,4 @@ async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
+
