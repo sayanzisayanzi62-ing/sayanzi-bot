@@ -1,6 +1,6 @@
 # =========================================
 # LUNEX BOT — MULTI-LANGUAGE + WEBSITE INTEGRATION + LEADERBOARDS
-# discord.py 2.x
+# discord.py 2.x (Optimized & Lightning Fast)
 # =========================================
 
 import discord
@@ -29,7 +29,7 @@ BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348
 SITE_URL = os.getenv("FRONTEND_URL", "https://lunexbot.netlify.app")
 
 # =========================================
-# MONGODB (نفس قاعدة بيانات الموقع) + CACHE SYSTEM
+# MONGODB & ADVANCED RAM CACHE SYSTEM
 # =========================================
 
 _mongo = MongoClient(os.environ["MONGODB_URI"], tlsCAFile=certifi.where())
@@ -49,8 +49,16 @@ DEFAULT_SETTINGS = {
     "commandAliases": []
 }
 
-# ذاكرة التخزين المؤقت لتسريع البوت بشكل خيالي
 settings_cache = {}
+
+def load_all_settings_to_cache():
+    """تحميل جميع الإعدادات إلى الذاكرة فور التشغيل لمنع أي تأخير لاحقاً"""
+    try:
+        for doc in guild_settings.find({}):
+            gid = str(doc.get("guildId"))
+            settings_cache[gid] = doc
+    except Exception as e:
+        print("Cache preload error:", e)
 
 def get_settings(guild_id: str) -> dict:
     if guild_id in settings_cache:
@@ -99,11 +107,16 @@ _views_registered = False
 _commands_synced = False
 
 # =========================================
-# DATABASE INITIALIZATION (SQLite - للـ XP والتوب فقط)
+# DATABASE INITIALIZATION (SQLite - سرعة فائقة بوضع WAL)
 # =========================================
 
 db = sqlite3.connect("lunex.db", check_same_thread=False)
 cur = db.cursor()
+
+# تفعيل وضع WAL لمنع تجميد قاعدة البيانات وتسريع الكتابة أضعافاً مضاعفة
+cur.execute("PRAGMA journal_mode=WAL;")
+cur.execute("PRAGMA synchronous = NORMAL;")
+db.commit()
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS xp(
@@ -240,7 +253,7 @@ def parse_time(t_str):
     return None
 
 # =========================================
-# TICKET VIEWS (مربوطة بلوحة التحكم بالموقع)
+# TICKET VIEWS
 # =========================================
 
 class CloseTicketView(discord.ui.View):
@@ -298,25 +311,8 @@ class TicketView(discord.ui.View):
             if not interaction.response.is_done():
                 await interaction.response.send_message("Something went wrong opening your ticket, try again.", ephemeral=True)
 
-async def post_ticket_panel(guild_id: str, channel_id: str):
-    guild = bot.get_guild(int(guild_id))
-    if not guild:
-        raise ValueError("Bot is not in this server")
-    channel = guild.get_channel(int(channel_id))
-    if not channel:
-        raise ValueError("Channel not found")
-
-    settings = get_settings(str(guild_id))
-    ticket = settings.get("ticket", {})
-
-    embed = discord.Embed(title="Ticket", description=ticket.get("message") or "Click the button below to open a new ticket.", color=COLOR)
-    if ticket.get("image"):
-        embed.set_image(url=ticket["image"])
-
-    await channel.send(embed=embed, view=TicketView())
-
 # =========================================
-# HELP MENU (فخم)
+# HELP MENU
 # =========================================
 
 class HelpSelect(discord.ui.Select):
@@ -443,6 +439,9 @@ async def reset_leaderboards():
 async def on_ready():
     global _views_registered, _commands_synced
 
+    # تحميل جميع الإعدادات إلى الذاكرة فور التشغيل لتجنب اللاق تماماً
+    load_all_settings_to_cache()
+
     if not _commands_synced:
         try:
             synced = await bot.tree.sync()
@@ -499,7 +498,7 @@ async def on_member_remove(member: discord.Member):
         print("leave error:", e)
 
 # =========================================
-# MESSAGE EVENT (محسّن وسريع)
+# MESSAGE EVENT (سرعة فائقة وخالية من التعليق)
 # =========================================
 
 @bot.event
@@ -521,7 +520,7 @@ async def on_message(message: discord.Message):
         print("xp update error:", e)
 
     try:
-        # قراءة الإعدادات من الكاش بسرعة فائقة
+        # قراءة الإعدادات من الذاكرة (RAM) فوراً بدون أي تأخير شبكي
         settings = get_settings(gid)
 
         for prefix in ("!", "#"):
@@ -645,7 +644,7 @@ async def slash_level(interaction: discord.Interaction):
     await interaction.response.send_message(embed=discord.Embed(title="📊 LEVEL", description=f"```{(row[0] if row else 0) // 50}```", color=COLOR))
 
 # =========================================
-# TOP LEADERBOARDS (!t / !t day / !t week)
+# TOP LEADERBOARDS
 # =========================================
 
 @bot.command(name="t")
@@ -670,7 +669,7 @@ async def top_command(ctx, mode: str = None):
     await ctx.send(embed=embed)
 
 # =========================================
-# AVATAR
+# AVATAR & SERVER INFO
 # =========================================
 
 @bot.command(name="افاتار")
@@ -679,10 +678,6 @@ async def avatar_command(ctx, member: discord.Member = None):
     embed = discord.Embed(title=f"Avatar: {member.name}", color=COLOR)
     embed.set_image(url=member.display_avatar.url)
     await ctx.send(embed=embed)
-
-# =========================================
-# SERVER INFO
-# =========================================
 
 @bot.command(name="سيرفر")
 async def server_info(ctx):
@@ -698,7 +693,7 @@ async def server_info(ctx):
     await ctx.send(embed=embed)
 
 # =========================================
-# PROFILE (!i)
+# PROFILE
 # =========================================
 
 @bot.command(name="i")
@@ -858,9 +853,7 @@ async def auto_reply(interaction: discord.Interaction, trigger: str, reply: str)
          "$setOnInsert": {"guildId": str(interaction.guild.id)}},
         upsert=True
     )
-    # تحديث الكاش ليعمل الرد فوراً بدون تأخير
     settings_cache[str(interaction.guild.id)] = guild_settings.find_one({"guildId": str(interaction.guild.id)})
-    
     await interaction.response.send_message(f"✅ Added auto-reply for `{trigger}`", ephemeral=True)
 
 @bot.tree.command(name="auto_reply_remove", description="Remove an automatic reply")
@@ -870,9 +863,7 @@ async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
         {"guildId": str(interaction.guild.id)},
         {"$pull": {"autoReplies": {"message": trigger}}}
     )
-    # تحديث الكاش بعد الحذف
     settings_cache[str(interaction.guild.id)] = guild_settings.find_one({"guildId": str(interaction.guild.id)})
-    
     await interaction.response.send_message("✅ Deleted successfully.", ephemeral=True)
 
 # =========================================
