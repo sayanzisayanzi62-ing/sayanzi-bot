@@ -89,6 +89,7 @@ bot = commands.Bot(
 )
 
 _views_registered = False
+_commands_synced = False
 
 # =========================================
 # DATABASE INITIALIZATION (SQLite - للـ XP والتوب فقط)
@@ -441,17 +442,20 @@ async def reset_leaderboards():
 
 
 # =========================================
-# BOT READY
+# BOT READY (المزامنة تصير مرة وحدة بس، مو كل إعادة اتصال)
 # =========================================
 
 @bot.event
 async def on_ready():
-    global _views_registered
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"❌ Failed to sync commands: {e}")
+    global _views_registered, _commands_synced
+
+    if not _commands_synced:
+        try:
+            synced = await bot.tree.sync()
+            print(f"✅ Synced {len(synced)} command(s)")
+        except Exception as e:
+            print(f"❌ Failed to sync commands: {e}")
+        _commands_synced = True
 
     if not _views_registered:
         bot.add_view(HelpView())
@@ -459,8 +463,9 @@ async def on_ready():
         bot.add_view(CloseTicketView())
         _views_registered = True
 
-    bot.loop.create_task(check_expired_premiums())
-    bot.loop.create_task(reset_leaderboards())
+        bot.loop.create_task(check_expired_premiums())
+        bot.loop.create_task(reset_leaderboards())
+
     print(f"✅ Lunex Bot Logged in as {bot.user}")
 
 
