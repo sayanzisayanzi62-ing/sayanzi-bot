@@ -10,7 +10,6 @@ from datetime import timedelta, datetime, timezone
 import asyncio
 import sqlite3
 import time
-import io
 import os
 import certifi
 
@@ -253,7 +252,7 @@ def parse_time(t_str):
     return None
 
 # =========================================
-# TICKET VIEWS
+# TICKET VIEWS & PANEL FUNCTION (مطلوب لـ app.py)
 # =========================================
 
 class CloseTicketView(discord.ui.View):
@@ -310,6 +309,30 @@ class TicketView(discord.ui.View):
             print("open ticket error:", e)
             if not interaction.response.is_done():
                 await interaction.response.send_message("Something went wrong opening your ticket, try again.", ephemeral=True)
+
+async def post_ticket_panel(guild_id: int, channel_id: int):
+    """دالة مطلوبة لملف app.py لإنشاء وإرسال لوحة التكتات من الموقع"""
+    guild = bot.get_guild(int(guild_id))
+    if not guild:
+        return False
+        
+    channel = guild.get_channel(int(channel_id))
+    if not channel:
+        return False
+        
+    settings = get_settings(str(guild_id))
+    ticket = settings.get("ticket", {})
+    
+    embed = discord.Embed(
+        title="Support Tickets / تكتات الدعم",
+        description=ticket.get("message", "اضغط الزر بالأسفل لفتح تكت جديد"),
+        color=COLOR
+    )
+    if ticket.get("image"):
+        embed.set_image(url=ticket["image"])
+        
+    await channel.send(embed=embed, view=TicketView())
+    return True
 
 # =========================================
 # HELP MENU
@@ -439,7 +462,6 @@ async def reset_leaderboards():
 async def on_ready():
     global _views_registered, _commands_synced
 
-    # تحميل جميع الإعدادات إلى الذاكرة فور التشغيل لتجنب اللاق تماماً
     load_all_settings_to_cache()
 
     if not _commands_synced:
@@ -520,7 +542,6 @@ async def on_message(message: discord.Message):
         print("xp update error:", e)
 
     try:
-        # قراءة الإعدادات من الذاكرة (RAM) فوراً بدون أي تأخير شبكي
         settings = get_settings(gid)
 
         for prefix in ("!", "#"):
