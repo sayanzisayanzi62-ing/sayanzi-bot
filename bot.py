@@ -49,12 +49,19 @@ DEFAULT_SETTINGS = {
     "commandAliases": []
 }
 
+# Cache to prevent frequent MongoDB lookups per message
+_settings_cache = {}
 
 def get_settings(guild_id: str) -> dict:
+    if guild_id in _settings_cache:
+        return _settings_cache[guild_id]
+    
     doc = guild_settings.find_one({"guildId": guild_id})
     if not doc:
         doc = {"guildId": guild_id, **DEFAULT_SETTINGS}
         guild_settings.insert_one(doc)
+    
+    _settings_cache[guild_id] = doc
     return doc
 
 
@@ -64,6 +71,8 @@ def update_settings(guild_id: str, update: dict) -> dict:
         {"$set": update, "$setOnInsert": {"guildId": guild_id}},
         upsert=True
     )
+    if guild_id in _settings_cache:
+        del _settings_cache[guild_id]
     return get_settings(guild_id)
 
 
@@ -76,10 +85,13 @@ def build_message(template: str, member: discord.Member) -> str:
 
 
 # =========================================
-# BOT INTENTS SETUP
+# BOT INTENTS SETUP (Optimized for speed)
 # =========================================
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+intents.guilds = True
 
 bot = commands.Bot(
     command_prefix=["!", "#"],
@@ -97,6 +109,10 @@ _commands_synced = False
 
 db = sqlite3.connect("lunex.db", check_same_thread=False)
 cur = db.cursor()
+
+# Enable WAL mode for significantly faster SQLite performance
+cur.execute("PRAGMA journal_mode=WAL;")
+cur.execute("PRAGMA synchronous=NORMAL;")
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS xp(
@@ -192,13 +208,17 @@ locales = {
     }
 }
 
+_lang_cache = {}
 
 def get_lang(user_id: str) -> str:
+    if user_id in _lang_cache:
+        return _lang_cache[user_id]
+    
     cur.execute("SELECT lang FROM user_settings WHERE user_id=?", (str(user_id),))
     row = cur.fetchone()
-    if row and row[0] in locales:
-        return row[0]
-    return "en"
+    lang = row[0] if row and row[0] in locales else "en"
+    _lang_cache[user_id] = lang
+    return lang
 
 
 def t(user_id: str, key: str, *args) -> str:
@@ -442,7 +462,7 @@ async def reset_leaderboards():
 
 
 # =========================================
-# BOT READY (المزامنة تصير مرة وحدة بس)
+# BOT READY
 # =========================================
 
 @bot.event
@@ -470,7 +490,7 @@ async def on_ready():
 
 
 # =========================================
-# WELCOME / LEAVE (من إعدادات الموقع فقط)
+# WELCOME / LEAVE
 # =========================================
 
 @bot.event
@@ -508,7 +528,7 @@ async def on_member_remove(member: discord.Member):
 
 
 # =========================================
-# MESSAGE EVENT (محصّنة: مهما صار خطأ، الأوامر تشتغل بالنهاية)
+# MESSAGE EVENT (Optimized & Non-blocking)
 # =========================================
 
 @bot.event
@@ -519,6 +539,7 @@ async def on_message(message: discord.Message):
     gid = str(message.guild.id)
     uid = str(message.author.id)
 
+    # Fire-and-forget or lightweight synchronous SQLite execution
     try:
         cur.execute("SELECT 1 FROM xp WHERE guild_id=? AND user_id=?", (gid, uid))
         if cur.fetchone():
@@ -549,7 +570,7 @@ async def on_message(message: discord.Message):
         for reply_entry in settings.get("autoReplies", []):
             trigger = (reply_entry.get("message") or "").strip().lower()
             if trigger and trigger in content_lower:
-                await message.channel.send(embed=discord.Embed(description=reply_entry.get("reply", ""), color=COLOR))
+                asyncio.create_task(message.channel.send(embed=discord.Embed(description=reply_entry.get("reply", ""), color=COLOR)))
                 break
     except Exception as e:
         print("mongo settings error:", e)
@@ -558,29 +579,21 @@ async def on_message(message: discord.Message):
         if not message.author.guild_permissions.administrator:
             for word, sec in badword_words.items():
                 if word in message.content.lower():
-                    try:
-                        await message.delete()
-                        await message.author.timeout(timedelta(seconds=sec))
-                        await message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words.")
-                    except Exception:
-                        pass
+                    asyncio.create_task(message.delete())
+                    asyncio.create_task(message.author.timeout(timedelta(seconds=sec)))
+                    asyncio.create_task(message.channel.send(f"⛔ {message.author.mention} has been timed out for using forbidden words."))
+                    break
 
             if "http://" in message.content.lower() or "https://" in message.content.lower():
-                try:
-                    await message.delete()
-                    await message.channel.send(f"🚫 {message.author.mention} Links are not allowed in this server!")
-                except Exception:
-                    pass
+                asyncio.create_task(message.delete())
+                asyncio.create_task(message.channel.send(f"🚫 {message.author.mention} Links are not allowed in this server!"))
 
             key = (gid, uid)
             spam_cache[key] = spam_cache.get(key, []) + [time.time()]
             spam_cache[key] = [t_ for t_ in spam_cache[key] if time.time() - t_ < 3]
             if len(spam_cache[key]) >= 5:
-                try:
-                    await message.author.timeout(timedelta(minutes=10), reason="Spamming")
-                    await message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming.")
-                except Exception:
-                    pass
+                asyncio.create_task(message.author.timeout(timedelta(minutes=10), reason="Spamming"))
+                asyncio.create_task(message.channel.send(f"⏱ {message.author.mention} You have been timed out for spamming."))
                 spam_cache[key] = []
     except Exception as e:
         print("protection error:", e)
@@ -602,6 +615,8 @@ async def set_language(interaction: discord.Interaction, lang: str):
     uid = str(interaction.user.id)
     cur.execute("INSERT INTO user_settings (user_id, lang) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET lang=?", (uid, lang, lang))
     db.commit()
+    if uid in _lang_cache:
+        del _lang_cache[uid]
     await interaction.response.send_message(t(uid, "lang_set"), ephemeral=True)
 
 
@@ -870,7 +885,7 @@ async def nickname(interaction: discord.Interaction, member: discord.Member, nic
 
 
 # =========================================
-# BADWORD & AUTO-REPLY (مربوطة بإعدادات الموقع)
+# BADWORD & AUTO-REPLY
 # =========================================
 
 @bot.tree.command(name="badword", description="Add banned word")
@@ -892,6 +907,9 @@ async def auto_reply(interaction: discord.Interaction, trigger: str, reply: str)
          "$setOnInsert": {"guildId": str(interaction.guild.id)}},
         upsert=True
     )
+    gid = str(interaction.guild.id)
+    if gid in _settings_cache:
+        del _settings_cache[gid]
     await interaction.response.send_message(f"✅ Added auto-reply for `{trigger}`", ephemeral=True)
 
 
@@ -901,6 +919,9 @@ async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
         {"guildId": str(interaction.guild.id)},
         {"$pull": {"autoReplies": {"message": trigger}}}
     )
+    gid = str(interaction.guild.id)
+    if gid in _settings_cache:
+        del _settings_cache[gid]
     await interaction.response.send_message("✅ Deleted successfully.", ephemeral=True)
 
 
@@ -910,3 +931,4 @@ async def auto_reply_remove(interaction: discord.Interaction, trigger: str):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
+
