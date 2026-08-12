@@ -1,5 +1,5 @@
 # =========================================
-# LUNEX BOT — OPTIMIZED EDITION + XP SYSTEM
+# LUNEX BOT — RAILWAY OPTIMIZED EDITION
 # discord.py 2.x
 # MongoDB + SQLite
 # =========================================
@@ -789,55 +789,6 @@ class TicketView(discord.ui.View):
                 )
 
 
-async def post_ticket_panel(
-    guild_id: str,
-    channel_id: str
-):
-
-    guild = bot.get_guild(
-        int(guild_id)
-    )
-
-    if not guild:
-        raise ValueError(
-            "Bot is not in this server."
-        )
-
-    channel = guild.get_channel(
-        int(channel_id)
-    )
-
-    if not channel:
-        raise ValueError(
-            "Channel not found."
-        )
-
-    settings = await get_settings(
-        str(guild_id)
-    )
-
-    ticket = settings["ticket"]
-
-    embed = discord.Embed(
-        title="Ticket",
-        description=(
-            ticket.get("message")
-            or "Click the button below to open a new ticket."
-        ),
-        color=COLOR
-    )
-
-    if ticket.get("image"):
-        embed.set_image(
-            url=ticket["image"]
-        )
-
-    await channel.send(
-        embed=embed,
-        view=TicketView()
-    )
-
-
 # =========================================
 # HELP
 # =========================================
@@ -1444,18 +1395,10 @@ async def on_message(
         message.author.id
     )
 
-    # -----------------------------
-    # XP
-    # -----------------------------
-
     add_xp_memory(
         gid,
         uid
     )
-
-    # -----------------------------
-    # SETTINGS
-    # -----------------------------
 
     try:
 
@@ -1476,10 +1419,6 @@ async def on_message(
         "protection",
         {}
     )
-
-    # -----------------------------
-    # COMMAND ALIASES
-    # -----------------------------
 
     try:
 
@@ -1542,10 +1481,6 @@ async def on_message(
             e
         )
 
-    # -----------------------------
-    # AUTO REPLIES
-    # -----------------------------
-
     try:
 
         content_lower = (
@@ -1596,15 +1531,9 @@ async def on_message(
             e
         )
 
-    # -----------------------------
-    # PROTECTION
-    # -----------------------------
-
     try:
 
         if not message.author.guild_permissions.administrator:
-
-            # BADWORDS
 
             if protection.get(
                 "badwords",
@@ -1658,8 +1587,6 @@ async def on_message(
 
                         break
 
-            # LINKS
-
             if protection.get(
                 "links",
                 True
@@ -1691,8 +1618,6 @@ async def on_message(
                             "link protection error:",
                             e
                         )
-
-            # ANTISPAM
 
             if protection.get(
                 "antispam",
@@ -1755,10 +1680,6 @@ async def on_message(
             "protection error:",
             e
         )
-
-    # -----------------------------
-    # COMMAND PROCESSING
-    # -----------------------------
 
     await bot.process_commands(
         message
@@ -1830,7 +1751,7 @@ async def set_language(
 
 
 # =========================================
-# PROTECTION
+# PROTECTION CONFIG
 # =========================================
 
 @bot.tree.command(
@@ -1899,7 +1820,7 @@ async def protection_config(
 
 
 # =========================================
-# HELP
+# HELP COMMANDS
 # =========================================
 
 @bot.command(
@@ -2046,7 +1967,7 @@ async def slash_xp(
 
 
 # =========================================
-# LEVEL
+# LEVEL COMMAND
 # =========================================
 
 @bot.command()
@@ -2159,7 +2080,7 @@ async def slash_level(
 
 
 # =========================================
-# LEADERBOARD
+# LEADERBOARD COMMAND
 # =========================================
 
 @bot.command(
@@ -2240,7 +2161,7 @@ async def top_command(
 
 
 # =========================================
-# AVATAR
+# AVATAR COMMAND
 # =========================================
 
 @bot.command(
@@ -2271,7 +2192,7 @@ async def avatar_command(
 
 
 # =========================================
-# SERVER INFO
+# SERVER INFO COMMAND
 # =========================================
 
 @bot.command(
@@ -2334,7 +2255,7 @@ async def server_info(
 
 
 # =========================================
-# PROFILE
+# PROFILE COMMAND
 # =========================================
 
 @bot.command(
@@ -2414,7 +2335,7 @@ async def profile(
 
 
 # =========================================
-# WARN RECORDS
+# WARN RECORDS COMMAND
 # =========================================
 
 @bot.command(
@@ -2464,7 +2385,7 @@ async def records_command(
 
 
 # =========================================
-# CLEAR
+# CLEAR COMMAND
 # =========================================
 
 @bot.command(
@@ -2511,7 +2432,7 @@ async def clear(
 
 
 # =========================================
-# BAN
+# BAN COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2543,7 +2464,7 @@ async def ban(
 
 
 # =========================================
-# KICK
+# KICK COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2575,7 +2496,7 @@ async def kick(
 
 
 # =========================================
-# UNBAN
+# UNBAN COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2620,7 +2541,7 @@ async def unban(
 
 
 # =========================================
-# LOCK
+# LOCK COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2656,7 +2577,7 @@ async def lock_slash(
 
 
 # =========================================
-# OPEN
+# OPEN COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2692,7 +2613,7 @@ async def open_slash(
 
 
 # =========================================
-# TIMEOUT
+# TIMEOUT COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2749,7 +2670,7 @@ async def timeout(
 
 
 # =========================================
-# REMOVE TIMEOUT
+# REMOVE TIMEOUT COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2787,7 +2708,7 @@ async def timeout_remove(
 
 
 # =========================================
-# ADD ROLE
+# ADD ROLE COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2831,7 +2752,7 @@ async def add_role(
 
 
 # =========================================
-# REMOVE ROLE
+# REMOVE ROLE COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2875,7 +2796,7 @@ async def remove_role(
 
 
 # =========================================
-# NICKNAME
+# NICKNAME COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -2927,7 +2848,7 @@ async def nickname(
 
 
 # =========================================
-# BADWORD
+# BADWORD COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -3001,7 +2922,7 @@ async def badword(
 
 
 # =========================================
-# AUTO REPLY ADD
+# AUTO REPLY ADD COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -3050,7 +2971,7 @@ async def auto_reply(
 
 
 # =========================================
-# AUTO REPLY REMOVE
+# AUTO REPLY REMOVE COMMAND
 # =========================================
 
 @bot.tree.command(
@@ -3093,7 +3014,7 @@ async def auto_reply_remove(
 
 
 # =========================================
-# READY
+# READY EVENT
 # =========================================
 
 @bot.event
@@ -3164,17 +3085,16 @@ async def on_ready():
 
 
 # =========================================
-# STARTUP / SHUTDOWN (Fixed for instant response)
+# STARTUP (RAILWAY COMPATIBLE)
 # =========================================
 
 async def main():
     await init_database()
     await bot.start(TOKEN)
 
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        print("🛑 Lunex stopped.")
+    except (KeyboardInterrupt, RuntimeError):
+        pass
 
