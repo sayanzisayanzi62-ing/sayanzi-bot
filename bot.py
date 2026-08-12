@@ -3164,48 +3164,17 @@ async def on_ready():
 
 
 # =========================================
-# STARTUP / SHUTDOWN
+# STARTUP / SHUTDOWN (Fixed for instant response)
 # =========================================
 
 async def main():
-
     await init_database()
+    await bot.start(TOKEN)
 
-    try:
-
-        await bot.start(
-            TOKEN
-        )
-
-    finally:
-
-        try:
-            await flush_xp()
-        except Exception:
-            pass
-
-        if db:
-
-            await db.close()
-
-        mongo.close()
-
-
-# =========================================
-# RUN
-# =========================================
 
 if __name__ == "__main__":
-
     try:
-
-        asyncio.run(
-            main()
-        )
-
+        asyncio.run(main())
     except KeyboardInterrupt:
-
-        print(
-            "🛑 Lunex stopped."
-        )
+        print("🛑 Lunex stopped.")
 
