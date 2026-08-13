@@ -1,39 +1,7 @@
 # ============================================================
 # LUNEX BOT — RAILWAY OPTIMIZED EDITION
 # discord.py 2.x
-# Motor (Async MongoDB) + aiosqlite
-#
-# Slash Commands:
-# /me
-# /profile
-# /server
-# /xp
-# /level
-# /language
-# /commands
-# /protection
-# /badword
-# /auto_reply
-# /auto_reply_remove
-# /ban
-# /kick
-# /unban
-# /timeout
-# /timeout_remove
-# /lock
-# /open
-# /add_role
-# /remove_role
-# /nickname
-#
-# Prefix:
-# !help
-# !xp
-# !level
-# !t
-# !clear
-# !مسح
-# !سجل
+# Motor Async MongoDB + aiosqlite
 # ============================================================
 
 import discord
@@ -79,6 +47,7 @@ SITE_URL = os.getenv(
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 
+
 if not TOKEN:
     raise RuntimeError(
         "DISCORD_BOT_TOKEN environment variable is missing."
@@ -91,22 +60,13 @@ if not MONGODB_URI:
 
 
 # ============================================================
-# MONGODB
+# DATABASE GLOBALS
 # ============================================================
 
-mongo = AsyncIOMotorClient(
-    MONGODB_URI,
-    tlsCAFile=certifi.where(),
-    serverSelectionTimeoutMS=5000,
-    connectTimeoutMS=5000,
-    socketTimeoutMS=5000,
-    maxPoolSize=20,
-    minPoolSize=1,
-)
-
-mdb = mongo.get_default_database()
-
-guild_settings = mdb["guildsettings"]
+mongo = None
+mdb = None
+guild_settings = None
+db = None
 
 
 # ============================================================
@@ -157,9 +117,15 @@ settings_cache = {}
 
 SETTINGS_CACHE_TTL = 300
 
-badword_cache = {}
+xp_pending = {}
 
-BADWORD_CACHE_TTL = 300
+spam_cache = {}
+
+# Cache للغة المستخدم
+language_cache = {}
+
+# Cache لتقليل عمليات الفحص
+guild_message_cache = {}
 
 
 # ============================================================
@@ -204,10 +170,7 @@ def merge_settings(data):
     ):
 
         if isinstance(data.get(key), dict):
-
-            settings[key].update(
-                data[key]
-            )
+            settings[key].update(data[key])
 
     for key in (
         "autoReplies",
@@ -215,11 +178,9 @@ def merge_settings(data):
     ):
 
         if isinstance(data.get(key), list):
-
             settings[key] = data[key]
 
     if isinstance(data.get("badwords"), dict):
-
         settings["badwords"] = data["badwords"]
 
     return settings
@@ -231,7 +192,7 @@ def merge_settings(data):
 
 async def get_settings(guild_id: str):
 
-    now = time.time()
+    now = time.monotonic()
 
     cached = settings_cache.get(guild_id)
 
@@ -240,38 +201,121 @@ async def get_settings(guild_id: str):
         expires_at, data = cached
 
         if now < expires_at:
-
             return data
 
-    doc = await guild_settings.find_one(
-        {
-            "guildId": guild_id
-        }
-    )
+    try:
+
+        doc = await guild_settings.find_one(
+            {"guildId": guild_id},
+            {
+                "_id": 0,
+                "guildId": 1,
+                "welcome": 1,
+                "leave": 1,
+                "ticket": 1,
+                "autoReplies": 1,
+                "commandAliases": 1,
+                "protection": 1,
+                "badwords": 1,
+            },
+        )
+
+    except Exception as e:
+
+        print("MongoDB get settings error:", repr(e))
+
+        if cached:
+            return cached[1]
+
+        data = clone_defaults()
+
+        data["compiled_badwords"] = {}
+
+        return data
 
     if not doc:
 
         data = clone_defaults()
 
-        await guild_settings.update_one(
+        try:
 
-            {
-                "guildId": guild_id
-            },
+            await guild_settings.update_one(
+                {"guildId": guild_id},
+                {
+                    "$setOnInsert": {
+                        "guildId": guild_id,
+                        **data,
+                    }
+                },
+                upsert=True,
+            )
 
-            {
-                "$setOnInsert": {
-                    "guildId": guild_id,
-                    **data,
-                }
-            },
+        except Exception as e:
 
-            upsert=True,
-        )
+            print("MongoDB insert settings error:", repr(e))
 
     else:
 
         data = merge_settings(doc)
+
+    # --------------------------------------------------------
+    # Compile badwords once
+    # --------------------------------------------------------
+
+    compiled_badwords = []
+
+    for word, seconds in data.get("badwords", {}).items():
+
+        word = str(word).strip().lower()
+
+        if not word:
+            continue
+
+        try:
+
+            pattern = re.compile(
+                r"(?<!\w)"
+                + re.escape(word)
+                + r"(?!\w)"
+            )
+
+            compiled_badwords.append(
+                (pattern, seconds)
+            )
+
+        except re.error:
+            continue
+
+    data["compiled_badwords"] = compiled_badwords
+
+    # --------------------------------------------------------
+    # Prepare aliases
+    # --------------------------------------------------------
+
+    aliases = {}
+
+    for entry in data.get("commandAliases", []):
+
+        if not isinstance(entry, dict):
+            continue
+
+        alias = str(
+            entry.get("alias", "")
+        ).strip().lower()
+
+        original = str(
+            entry.get("original", "")
+        ).strip()
+
+        if alias and original:
+
+            aliases[alias] = original
+
+    data["aliases_map"] = aliases
+
+    # --------------------------------------------------------
+    # Cache
+    # --------------------------------------------------------
 
     settings_cache[guild_id] = (
         now + SETTINGS_CACHE_TTL,
@@ -285,36 +329,30 @@ async def get_settings(guild_id: str):
 # UPDATE SETTINGS
 # ============================================================
 
-async def update_settings(
-    guild_id: str,
-    update: dict,
-):
+async def update_settings(guild_id: str, update: dict):
 
-    await guild_settings.update_one(
+    try:
 
-        {
-            "guildId": guild_id
-        },
-
-        {
-            "$set": update,
-
-            "$setOnInsert": {
-                "guildId": guild_id
+        await guild_settings.update_one(
+            {"guildId": guild_id},
+            {
+                "$set": update,
+                "$setOnInsert": {
+                    "guildId": guild_id
+                },
             },
-        },
+            upsert=True,
+        )
 
-        upsert=True,
-    )
+    except Exception as e:
 
-    settings_cache.pop(
-        guild_id,
-        None,
-    )
+        print("MongoDB update error:", repr(e))
 
-    return await get_settings(
-        guild_id
-    )
+        raise
+
+    settings_cache.pop(guild_id, None)
+
+    return await get_settings(guild_id)
 
 
 # ============================================================
@@ -323,39 +361,39 @@ async def update_settings(
 
 def build_message(
     template: str,
-    member: discord.Member,
+    member: discord.Member
 ):
 
     text = template or ""
 
     text = text.replace(
         "[User]",
-        member.mention,
+        member.mention
     )
 
     text = text.replace(
         "[user]",
-        member.mention,
+        member.mention
     )
 
     text = text.replace(
         "[Img]",
-        "",
+        ""
     )
 
     text = text.replace(
         "[img]",
-        "",
+        ""
     )
 
     text = text.replace(
         "[nember]",
-        str(member.guild.member_count),
+        str(member.guild.member_count)
     )
 
     text = text.replace(
         "[member_count]",
-        str(member.guild.member_count),
+        str(member.guild.member_count)
     )
 
     return text
@@ -375,45 +413,11 @@ intents.guilds = True
 
 
 bot = commands.Bot(
-
-    command_prefix=[
-        "!",
-        "#",
-    ],
-
+    command_prefix=["!", "#"],
     intents=intents,
-
     case_insensitive=True,
-
     help_command=None,
 )
-
-
-# ============================================================
-# GLOBAL VARIABLES
-# ============================================================
-
-db = None
-
-_views_registered = False
-
-_commands_synced = False
-
-_background_started = False
-
-
-# ============================================================
-# XP MEMORY CACHE
-# ============================================================
-
-xp_pending = {}
-
-
-# ============================================================
-# SPAM CACHE
-# ============================================================
-
-spam_cache = {}
 
 
 # ============================================================
@@ -527,19 +531,33 @@ locales = {
 
 
 # ============================================================
-# DATABASE
+# DATABASE INIT
 # ============================================================
 
 async def init_database():
 
     global db
+    global mongo
+    global mdb
+    global guild_settings
+
+    # --------------------------------------------------------
+    # SQLite
+    # --------------------------------------------------------
 
     db = await aiosqlite.connect(
         "lunex.db"
     )
 
-    await db.execute(
-        """
+    await db.execute("""
+        PRAGMA journal_mode=WAL
+    """)
+
+    await db.execute("""
+        PRAGMA synchronous=NORMAL
+    """)
+
+    await db.execute("""
         CREATE TABLE IF NOT EXISTS xp(
             guild_id TEXT,
             user_id TEXT,
@@ -549,22 +567,18 @@ async def init_database():
             month_count INTEGER DEFAULT 0,
             PRIMARY KEY(guild_id, user_id)
         )
-        """
-    )
+    """)
 
-    await db.execute(
-        """
+    await db.execute("""
         CREATE TABLE IF NOT EXISTS warns(
             guild_id TEXT,
             user_id TEXT,
             warns INTEGER DEFAULT 0,
             PRIMARY KEY(guild_id, user_id)
         )
-        """
-    )
+    """)
 
-    await db.execute(
-        """
+    await db.execute("""
         CREATE TABLE IF NOT EXISTS premium_users(
             user_id TEXT,
             guild_id TEXT,
@@ -572,30 +586,80 @@ async def init_database():
             expiry_time REAL,
             PRIMARY KEY(user_id, guild_id)
         )
-        """
-    )
+    """)
 
-    await db.execute(
-        """
+    await db.execute("""
         CREATE TABLE IF NOT EXISTS user_settings(
             user_id TEXT PRIMARY KEY,
             lang TEXT DEFAULT 'en'
         )
-        """
-    )
+    """)
 
-    await db.execute(
-        """
+    await db.execute("""
         CREATE TABLE IF NOT EXISTS reset_tracker(
             id INTEGER PRIMARY KEY CHECK(id = 1),
             last_day TEXT,
             last_week TEXT,
             last_month TEXT
         )
-        """
-    )
+    """)
 
     await db.commit()
+
+    # --------------------------------------------------------
+    # MongoDB
+    # --------------------------------------------------------
+
+    mongo = AsyncIOMotorClient(
+        MONGODB_URI,
+
+        tlsCAFile=certifi.where(),
+
+        serverSelectionTimeoutMS=5000,
+
+        connectTimeoutMS=5000,
+
+        socketTimeoutMS=5000,
+
+        maxPoolSize=50,
+
+        minPoolSize=2,
+
+        retryWrites=True,
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # get_default_database() can fail if URI has no DB name.
+    # --------------------------------------------------------
+
+    try:
+
+        mdb = mongo.get_default_database()
+
+    except Exception:
+
+        mdb = mongo["lunex"]
+
+    guild_settings = mdb["guildsettings"]
+
+    # --------------------------------------------------------
+    # Mongo index
+    # --------------------------------------------------------
+
+    try:
+
+        await guild_settings.create_index(
+            "guildId",
+            unique=True
+        )
+
+    except Exception as e:
+
+        print(
+            "MongoDB index warning:",
+            repr(e)
+        )
 
 
 # ============================================================
@@ -604,49 +668,54 @@ async def init_database():
 
 async def get_lang(user_id: str):
 
-    async with db.execute(
+    cached = language_cache.get(user_id)
 
-        """
-        SELECT lang
-        FROM user_settings
-        WHERE user_id=?
-        """,
+    if cached:
+        return cached
 
-        (
-            str(user_id),
-        ),
+    try:
 
-    ) as cursor:
+        async with db.execute(
+            """
+            SELECT lang
+            FROM user_settings
+            WHERE user_id=?
+            """,
+            (str(user_id),)
+        ) as cursor:
 
-        row = await cursor.fetchone()
+            row = await cursor.fetchone()
+
+    except Exception:
+
+        return "en"
+
+    lang = "en"
 
     if row and row[0] in locales:
+        lang = row[0]
 
-        return row[0]
+    language_cache[user_id] = lang
 
-    return "en"
+    return lang
 
 
 async def t(
     user_id: str,
     key: str,
-    *args,
+    *args
 ):
 
-    lang = await get_lang(
-        user_id
-    )
+    lang = await get_lang(user_id)
 
     text = locales[lang].get(
         key,
-        key,
+        key
     )
 
     if args:
 
-        text = text.format(
-            *args
-        )
+        text = text.format(*args)
 
     return text
 
@@ -664,9 +733,7 @@ def parse_time(value):
         if len(value) < 2:
             return None
 
-        number = int(
-            value[:-1]
-        )
+        number = int(value[:-1])
 
         unit = value[-1]
 
@@ -698,12 +765,10 @@ def parse_time(value):
 
 async def check_hierarchy(
     interaction: discord.Interaction,
-    member: discord.Member,
+    member: discord.Member
 ):
 
-    uid = str(
-        interaction.user.id
-    )
+    uid = str(interaction.user.id)
 
     guild = interaction.guild
 
@@ -711,7 +776,7 @@ async def check_hierarchy(
 
         await interaction.response.send_message(
             "This command can only be used in a server.",
-            ephemeral=True,
+            ephemeral=True
         )
 
         return False
@@ -722,46 +787,37 @@ async def check_hierarchy(
 
         await interaction.response.send_message(
             "Bot member is unavailable.",
-            ephemeral=True,
+            ephemeral=True
         )
 
         return False
 
-    # لا يمكن تعديل صاحب السيرفر
     if member == guild.owner:
 
         await interaction.response.send_message(
             "You cannot moderate the server owner.",
-            ephemeral=True,
+            ephemeral=True
         )
 
         return False
 
-    # رتبة العضو أعلى أو مساوية للبوت
     if member.top_role >= me.top_role:
 
         await interaction.response.send_message(
-            await t(
-                uid,
-                "higher_bot",
-            ),
-            ephemeral=True,
+            await t(uid, "higher_bot"),
+            ephemeral=True
         )
 
         return False
 
-    # رتبة العضو أعلى أو مساوية للمنفذ
     if (
         member.top_role >= interaction.user.top_role
         and interaction.user.id != guild.owner_id
     ):
 
         await interaction.response.send_message(
-            await t(
-                uid,
-                "higher_user",
-            ),
-            ephemeral=True,
+            await t(uid, "higher_user"),
+            ephemeral=True
         )
 
         return False
@@ -775,34 +831,34 @@ async def check_hierarchy(
 
 def add_xp_memory(
     guild_id,
-    user_id,
+    user_id
 ):
 
     key = (
         str(guild_id),
-        str(user_id),
+        str(user_id)
     )
 
-    if key not in xp_pending:
+    values = xp_pending.get(key)
 
-        xp_pending[key] = {
+    if values is None:
 
+        values = {
             "messages": 0,
-
             "day_count": 0,
-
             "week_count": 0,
-
             "month_count": 0,
         }
 
-    xp_pending[key]["messages"] += 1
+        xp_pending[key] = values
 
-    xp_pending[key]["day_count"] += 1
+    values["messages"] += 1
 
-    xp_pending[key]["week_count"] += 1
+    values["day_count"] += 1
 
-    xp_pending[key]["month_count"] += 1
+    values["week_count"] += 1
+
+    values["month_count"] += 1
 
 
 # ============================================================
@@ -822,15 +878,21 @@ async def flush_xp():
 
     try:
 
+        async with db.execute(
+            "BEGIN"
+        ):
+
+            pass
+
         for (
             guild_id,
-            user_id,
+            user_id
         ), values in pending.items():
 
             await db.execute(
-
                 """
-                INSERT INTO xp (
+                INSERT INTO xp
+                (
                     guild_id,
                     user_id,
                     messages,
@@ -838,33 +900,23 @@ async def flush_xp():
                     week_count,
                     month_count
                 )
-
                 VALUES (?, ?, ?, ?, ?, ?)
 
-                ON CONFLICT(
-                    guild_id,
-                    user_id
-                )
-
+                ON CONFLICT(guild_id, user_id)
                 DO UPDATE SET
 
                     messages =
-                        messages
-                        + excluded.messages,
+                        messages + excluded.messages,
 
                     day_count =
-                        day_count
-                        + excluded.day_count,
+                        day_count + excluded.day_count,
 
                     week_count =
-                        week_count
-                        + excluded.week_count,
+                        week_count + excluded.week_count,
 
                     month_count =
-                        month_count
-                        + excluded.month_count
+                        month_count + excluded.month_count
                 """,
-
                 (
                     guild_id,
                     user_id,
@@ -872,7 +924,7 @@ async def flush_xp():
                     values["day_count"],
                     values["week_count"],
                     values["month_count"],
-                ),
+                )
             )
 
         await db.commit()
@@ -881,8 +933,13 @@ async def flush_xp():
 
         print(
             "XP flush error:",
-            e,
+            repr(e)
         )
+
+        try:
+            await db.rollback()
+        except Exception:
+            pass
 
         for key, values in pending.items():
 
@@ -917,14 +974,14 @@ async def xp_loop():
 
             print(
                 "XP loop error:",
-                e,
+                repr(e)
             )
 
         await asyncio.sleep(10)
 
 
 # ============================================================
-# PREMIUM EXPIRATION
+# PREMIUM LOOP
 # ============================================================
 
 async def check_expired_premiums():
@@ -938,15 +995,11 @@ async def check_expired_premiums():
             current_time = time.time()
 
             await db.execute(
-
                 """
                 DELETE FROM premium_users
                 WHERE expiry_time <= ?
                 """,
-
-                (
-                    current_time,
-                ),
+                (current_time,)
             )
 
             await db.commit()
@@ -955,7 +1008,7 @@ async def check_expired_premiums():
 
             print(
                 "Premium error:",
-                e,
+                repr(e)
             )
 
         await asyncio.sleep(60)
@@ -992,7 +1045,6 @@ async def reset_leaderboards():
             )
 
             async with db.execute(
-
                 """
                 SELECT
                     last_day,
@@ -1001,7 +1053,6 @@ async def reset_leaderboards():
                 FROM reset_tracker
                 WHERE id=1
                 """
-
             ) as cursor:
 
                 row = await cursor.fetchone()
@@ -1009,17 +1060,15 @@ async def reset_leaderboards():
             if not row:
 
                 await db.execute(
-
                     """
                     INSERT INTO reset_tracker
                     VALUES(1, ?, ?, ?)
                     """,
-
                     (
                         today,
                         week,
-                        month,
-                    ),
+                        month
+                    )
                 )
 
             else:
@@ -1027,43 +1076,52 @@ async def reset_leaderboards():
                 (
                     last_day,
                     last_week,
-                    last_month,
+                    last_month
                 ) = row
 
                 if last_day != today:
 
                     await db.execute(
-                        "UPDATE xp SET day_count=0"
+                        """
+                        UPDATE xp
+                        SET day_count=0
+                        """
                     )
 
                 if last_week != week:
 
                     await db.execute(
-                        "UPDATE xp SET week_count=0"
+                        """
+                        UPDATE xp
+                        SET week_count=0
+                        """
                     )
 
                 if last_month != month:
 
                     await db.execute(
-                        "UPDATE xp SET month_count=0"
+                        """
+                        UPDATE xp
+                        SET month_count=0
+                        """
                     )
 
                 await db.execute(
-
                     """
                     UPDATE reset_tracker
+
                     SET
                         last_day=?,
                         last_week=?,
                         last_month=?
+
                     WHERE id=1
                     """,
-
                     (
                         today,
                         week,
-                        month,
-                    ),
+                        month
+                    )
                 )
 
             await db.commit()
@@ -1072,88 +1130,14 @@ async def reset_leaderboards():
 
             print(
                 "Reset error:",
-                e,
+                repr(e)
             )
 
         await asyncio.sleep(3600)
 
 
 # ============================================================
-# BADWORDS
-# ============================================================
-
-async def load_badwords(
-    guild_id,
-):
-
-    try:
-
-        doc = await guild_settings.find_one(
-
-            {
-                "guildId": str(guild_id)
-            },
-
-            {
-                "badwords": 1
-            },
-        )
-
-        if not doc:
-
-            return {}
-
-        return doc.get(
-            "badwords",
-            {},
-        )
-
-    except Exception as e:
-
-        print(
-            "Load badwords error:",
-            e,
-        )
-
-        return {}
-
-
-async def get_badwords(
-    guild_id,
-):
-
-    guild_id = str(
-        guild_id
-    )
-
-    now = time.time()
-
-    cached = badword_cache.get(
-        guild_id
-    )
-
-    if cached:
-
-        expires_at, data = cached
-
-        if now < expires_at:
-
-            return data
-
-    data = await load_badwords(
-        guild_id
-    )
-
-    badword_cache[guild_id] = (
-        now + BADWORD_CACHE_TTL,
-        data,
-    )
-
-    return data
-
-
-# ============================================================
-# TICKET CLOSE VIEW
+# TICKET VIEWS
 # ============================================================
 
 class CloseTicketView(
@@ -1170,12 +1154,12 @@ class CloseTicketView(
         label="Close Ticket",
         style=discord.ButtonStyle.danger,
         emoji="🔒",
-        custom_id="lunex_close_ticket",
+        custom_id="lunex_close_ticket"
     )
     async def close_ticket(
         self,
         interaction: discord.Interaction,
-        button: discord.ui.Button,
+        button: discord.ui.Button
     ):
 
         await interaction.response.send_message(
@@ -1186,19 +1170,17 @@ class CloseTicketView(
 
         try:
 
-            await interaction.channel.delete()
+            if interaction.channel:
+
+                await interaction.channel.delete()
 
         except Exception as e:
 
             print(
                 "Ticket delete error:",
-                e,
+                repr(e)
             )
 
-
-# ============================================================
-# TICKET OPEN VIEW
-# ============================================================
 
 class TicketView(
     discord.ui.View
@@ -1214,12 +1196,12 @@ class TicketView(
         label="Open Ticket",
         style=discord.ButtonStyle.primary,
         emoji="🎫",
-        custom_id="lunex_open_ticket",
+        custom_id="lunex_open_ticket"
     )
     async def open_ticket(
         self,
         interaction: discord.Interaction,
-        button: discord.ui.Button,
+        button: discord.ui.Button
     ):
 
         try:
@@ -1227,6 +1209,7 @@ class TicketView(
             guild = interaction.guild
 
             if not guild:
+
                 return
 
             settings = await get_settings(
@@ -1235,17 +1218,18 @@ class TicketView(
 
             ticket = settings.get(
                 "ticket",
-                {},
+                {}
             )
 
             raw_name = (
                 f"ticket-{interaction.user.name}"
-            ).lower()
+                .lower()
+            )
 
             safe_name = re.sub(
                 r"[^a-z0-9\-]",
                 "",
-                raw_name,
+                raw_name
             )[:90]
 
             if not safe_name:
@@ -1256,17 +1240,14 @@ class TicketView(
 
             existing = discord.utils.get(
                 guild.text_channels,
-                name=safe_name,
+                name=safe_name
             )
 
             if existing:
 
                 await interaction.response.send_message(
-
-                    f"You already have an open ticket: "
-                    f"{existing.mention}",
-
-                    ephemeral=True,
+                    f"You already have an open ticket: {existing.mention}",
+                    ephemeral=True
                 )
 
                 return
@@ -1282,22 +1263,22 @@ class TicketView(
                     discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True,
-                        read_message_history=True,
+                        read_message_history=True
                     ),
 
                 guild.me:
                     discord.PermissionOverwrite(
                         view_channel=True,
                         send_messages=True,
-                        read_message_history=True,
+                        read_message_history=True
                     ),
             }
-
-            category = None
 
             category_id = ticket.get(
                 "categoryId"
             )
+
+            category = None
 
             if category_id:
 
@@ -1312,37 +1293,27 @@ class TicketView(
                     category = None
 
             channel = await guild.create_text_channel(
-
                 safe_name,
-
                 overwrites=overwrites,
-
-                category=category,
+                category=category
             )
 
             description = build_message(
-
                 ticket.get(
                     "description"
                 )
                 or
                 "Hello [User], our support team will be with you shortly.",
-
-                interaction.user,
+                interaction.user
             )
 
             embed = discord.Embed(
-
                 title="Ticket",
-
                 description=description,
-
-                color=COLOR,
+                color=COLOR
             )
 
-            image = ticket.get(
-                "image"
-            )
+            image = ticket.get("image")
 
             if image:
 
@@ -1351,39 +1322,32 @@ class TicketView(
                 )
 
             await channel.send(
-
                 embed=embed,
-
-                view=CloseTicketView(),
+                view=CloseTicketView()
             )
 
             await interaction.response.send_message(
-
-                f"Your ticket has been opened: "
-                f"{channel.mention}",
-
-                ephemeral=True,
+                f"Your ticket has been opened: {channel.mention}",
+                ephemeral=True
             )
 
         except Exception as e:
 
             print(
                 "Open ticket error:",
-                e,
+                repr(e)
             )
 
             if not interaction.response.is_done():
 
                 await interaction.response.send_message(
-
                     "Something went wrong opening your ticket.",
-
-                    ephemeral=True,
+                    ephemeral=True
                 )
 
 
 # ============================================================
-# HELP SELECT
+# HELP
 # ============================================================
 
 class HelpSelect(
@@ -1395,139 +1359,97 @@ class HelpSelect(
         options = [
 
             discord.SelectOption(
-
                 label="All member",
-
-                description=(
-                    "Member commands & XP"
-                ),
-
-                emoji="👥",
+                description="Member commands & XP",
+                emoji="👥"
             ),
 
             discord.SelectOption(
-
                 label="Staff member",
-
-                description=(
-                    "Administration and security commands"
-                ),
-
-                emoji="👑",
+                description="Administration and security commands",
+                emoji="👑"
             ),
         ]
 
         super().__init__(
-
             placeholder="Select desired category",
-
             options=options,
-
-            custom_id="help_select",
+            custom_id="help_select"
         )
 
     async def callback(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction
     ):
 
-        selected = self.values[0]
-
-        if selected == "All member":
+        if self.values[0] == "All member":
 
             embed = discord.Embed(
-
                 title="👥 ALL MEMBER COMMANDS",
-
                 description=(
-
                     "**Everything available to every member.**\n\n"
-
                     f"Visit us: {SITE_URL}"
                 ),
-
-                color=COLOR,
+                color=COLOR
             )
 
             embed.add_field(
-
                 name="⭐ XP & Leaderboards",
-
                 value=(
-
                     "**/xp** — your XP\n"
                     "**/level** — your level\n"
                     "**!t** — monthly top 10\n"
                     "**!t day** — daily top 10\n"
                     "**!t week** — weekly top 10"
                 ),
-
-                inline=False,
+                inline=False
             )
 
             embed.add_field(
-
                 name="📌 Info",
-
                 value=(
-
                     "**/me** — your profile\n"
                     "**/profile** `[member]` — avatar\n"
                     "**/server** — server info\n"
                     "**/language** — set language\n"
                     "**/commands** — commands"
                 ),
-
-                inline=False,
+                inline=False
             )
 
         else:
 
             embed = discord.Embed(
-
                 title="👑 STAFF MEMBER COMMANDS",
-
                 description=(
-
-                    "**Moderation, security, and "
-                    "server management.**\n\n"
-
+                    "**Moderation, security, and server management.**\n\n"
                     f"Visit us: {SITE_URL}"
                 ),
-
-                color=COLOR,
+                color=COLOR
             )
 
             embed.add_field(
-
                 name="🛡️ Moderation",
-
                 value=(
-
                     "**/ban** | **/kick** | **/unban**\n"
                     "**/timeout** | **/timeout_remove**\n"
                     "**/lock** | **/open**\n"
                     "**!clear** / **!مسح**\n"
                     "**!سجل**"
                 ),
-
-                inline=False,
+                inline=False
             )
 
             embed.add_field(
-
                 name="⚙️ Management",
-
                 value=(
-
                     "**/add_role** | **/remove_role**\n"
                     "**/nickname**\n"
                     "**/badword**\n"
                     "**/auto_reply**\n"
                     "**/protection**"
                 ),
-
-                inline=False,
+                inline=False
             )
 
         if bot.user:
@@ -1541,16 +1463,10 @@ class HelpSelect(
         )
 
         await interaction.response.edit_message(
-
             embed=embed,
-
-            view=HelpView(),
+            view=HelpView()
         )
 
-
-# ============================================================
-# HELP VIEW
-# ============================================================
 
 class HelpView(
     discord.ui.View
@@ -1567,67 +1483,42 @@ class HelpView(
         )
 
         self.add_item(
-
             discord.ui.Button(
-
                 label="Add Bot",
-
                 emoji="🔗",
-
                 url=BOT_INVITE,
-
-                style=discord.ButtonStyle.link,
+                style=discord.ButtonStyle.link
             )
         )
 
         self.add_item(
-
             discord.ui.Button(
-
                 label="Support",
-
                 emoji="💬",
-
                 url=SUPPORT_INVITE,
-
-                style=discord.ButtonStyle.link,
+                style=discord.ButtonStyle.link
             )
         )
 
         self.add_item(
-
             discord.ui.Button(
-
                 label="Website",
-
                 emoji="🌐",
-
                 url=SITE_URL,
-
-                style=discord.ButtonStyle.link,
+                style=discord.ButtonStyle.link
             )
         )
 
-
-# ============================================================
-# MAIN HELP EMBED
-# ============================================================
 
 def build_main_embed():
 
     embed = discord.Embed(
-
         title="🌙 LUNEX BOT",
-
         description=(
-
-            "**Advanced, powerful, and simple "
-            "server management.**\n\n"
-
+            "**Advanced, powerful, and simple server management.**\n\n"
             f"To learn more, visit us: {SITE_URL}"
         ),
-
-        color=COLOR,
+        color=COLOR
     )
 
     if bot.user:
@@ -1644,12 +1535,12 @@ def build_main_embed():
 
 
 # ============================================================
-# WELCOME
+# EVENTS
 # ============================================================
 
 @bot.event
 async def on_member_join(
-    member: discord.Member,
+    member: discord.Member
 ):
 
     try:
@@ -1660,13 +1551,10 @@ async def on_member_join(
 
         welcome = settings.get(
             "welcome",
-            {},
+            {}
         )
 
-        if not welcome.get(
-            "enabled"
-        ):
-
+        if not welcome.get("enabled"):
             return
 
         channel_id = welcome.get(
@@ -1674,7 +1562,6 @@ async def on_member_join(
         )
 
         if not channel_id:
-
             return
 
         channel = member.guild.get_channel(
@@ -1682,21 +1569,14 @@ async def on_member_join(
         )
 
         if not channel:
-
             return
 
         embed = discord.Embed(
-
             description=build_message(
-
-                welcome.get(
-                    "message"
-                ),
-
-                member,
+                welcome.get("message"),
+                member
             ),
-
-            color=COLOR,
+            color=COLOR
         )
 
         embed.set_image(
@@ -1711,17 +1591,13 @@ async def on_member_join(
 
         print(
             "Welcome error:",
-            e,
+            repr(e)
         )
 
 
-# ============================================================
-# LEAVE
-# ============================================================
-
 @bot.event
 async def on_member_remove(
-    member: discord.Member,
+    member: discord.Member
 ):
 
     try:
@@ -1732,13 +1608,10 @@ async def on_member_remove(
 
         leave = settings.get(
             "leave",
-            {},
+            {}
         )
 
-        if not leave.get(
-            "enabled"
-        ):
-
+        if not leave.get("enabled"):
             return
 
         channel_id = leave.get(
@@ -1746,7 +1619,6 @@ async def on_member_remove(
         )
 
         if not channel_id:
-
             return
 
         channel = member.guild.get_channel(
@@ -1754,21 +1626,14 @@ async def on_member_remove(
         )
 
         if not channel:
-
             return
 
         embed = discord.Embed(
-
             description=build_message(
-
-                leave.get(
-                    "message"
-                ),
-
-                member,
+                leave.get("message"),
+                member
             ),
-
-            color=COLOR,
+            color=COLOR
         )
 
         embed.set_image(
@@ -1783,25 +1648,24 @@ async def on_member_remove(
 
         print(
             "Leave error:",
-            e,
+            repr(e)
         )
 
 
 # ============================================================
-# MESSAGE EVENT
+# OPTIMIZED ON_MESSAGE
 # ============================================================
 
 @bot.event
 async def on_message(
-    message: discord.Message,
+    message: discord.Message
 ):
 
-    # تجاهل البوتات والرسائل خارج السيرفر
-    if (
-        message.author.bot
-        or not message.guild
-    ):
+    if message.author.bot:
+        return
 
+    if not message.guild:
+        await bot.process_commands(message)
         return
 
     gid = str(
@@ -1812,18 +1676,22 @@ async def on_message(
         message.author.id
     )
 
-    # ========================================================
+    content = message.content
+
+    content_lower = content.lower()
+
+    # --------------------------------------------------------
     # XP
-    # ========================================================
+    # --------------------------------------------------------
 
     add_xp_memory(
         gid,
-        uid,
+        uid
     )
 
-    # ========================================================
-    # SETTINGS
-    # ========================================================
+    # --------------------------------------------------------
+    # Get settings
+    # --------------------------------------------------------
 
     try:
 
@@ -1835,151 +1703,114 @@ async def on_message(
 
         print(
             "Settings error:",
-            e,
+            repr(e)
         )
 
         settings = clone_defaults()
 
-    protection = settings.get(
-        "protection",
-        {},
+        settings["compiled_badwords"] = []
+
+        settings["aliases_map"] = {}
+
+    # --------------------------------------------------------
+    # COMMAND ALIAS
+    # --------------------------------------------------------
+
+    if content.startswith(
+        ("!", "#")
+    ):
+
+        prefix = content[0]
+
+        rest = content[1:]
+
+        first_word, separator, remainder = (
+            rest.partition(" ")
+        )
+
+        alias_map = settings.get(
+            "aliases_map",
+            {}
+        )
+
+        original = alias_map.get(
+            first_word.lower()
+        )
+
+        if original:
+
+            new_content = (
+                f"{prefix}{original}"
+            )
+
+            if separator:
+
+                new_content += (
+                    f" {remainder}"
+                )
+
+            message.content = new_content
+
+    # --------------------------------------------------------
+    # AUTO REPLY
+    # --------------------------------------------------------
+
+    auto_replies = settings.get(
+        "autoReplies",
+        []
     )
 
-    # ========================================================
-    # COMMAND ALIASES
-    # ========================================================
+    if auto_replies:
 
-    try:
+        for reply_entry in auto_replies:
 
-        content = message.content
+            if not isinstance(
+                reply_entry,
+                dict
+            ):
+                continue
 
-        if content.startswith(
-            (
-                "!",
-                "#",
-            )
-        ):
+            trigger = str(
+                reply_entry.get(
+                    "message",
+                    ""
+                )
+            ).strip().lower()
 
-            prefix = content[0]
+            if (
+                trigger
+                and trigger in content_lower
+            ):
 
-            rest = content[1:]
-
-            first_word, separator, remainder = (
-                rest.partition(" ")
-            )
-
-            if first_word:
-
-                for alias_entry in settings.get(
-                    "commandAliases",
-                    [],
-                ):
-
-                    alias = str(
-                        alias_entry.get(
-                            "alias",
-                            "",
-                        )
-                    ).lower()
-
-                    if (
-                        first_word.lower()
-                        == alias
-                    ):
-
-                        original = alias_entry.get(
-                            "original"
-                        )
-
-                        if original:
-
-                            new_content = (
-                                f"{prefix}{original}"
-                            )
-
-                            if separator:
-
-                                new_content += (
-                                    f" {remainder}"
-                                )
-
-                            message.content = (
-                                new_content
-                            )
-
-                        break
-
-    except Exception as e:
-
-        print(
-            "Alias error:",
-            e,
-        )
-
-    # ========================================================
-    # AUTO REPLY
-    # ========================================================
-
-    try:
-
-        auto_replies = settings.get(
-            "autoReplies",
-            [],
-        )
-
-        if auto_replies:
-
-            content_lower = (
-                message.content
-                .strip()
-                .lower()
-            )
-
-            for reply_entry in auto_replies:
-
-                trigger = str(
+                reply = str(
                     reply_entry.get(
-                        "message",
-                        "",
-                    )
-                ).strip().lower()
-
-                if not trigger:
-
-                    continue
-
-                if trigger in content_lower:
-
-                    reply = reply_entry.get(
                         "reply",
-                        "",
+                        ""
+                    )
+                )
+
+                if reply:
+
+                    embed = discord.Embed(
+                        description=reply,
+                        color=COLOR
                     )
 
-                    if reply:
-
-                        embed = discord.Embed(
-
-                            description=reply,
-
-                            color=COLOR,
-                        )
+                    try:
 
                         await message.channel.send(
                             embed=embed
                         )
 
-                    break
+                    except discord.HTTPException:
 
-    except Exception as e:
+                        pass
 
-        print(
-            "Auto reply error:",
-            e,
-        )
+                break
 
-    # ========================================================
+    # --------------------------------------------------------
     # ADMIN BYPASS
-    # ========================================================
+    # --------------------------------------------------------
 
     if message.author.guild_permissions.administrator:
 
@@ -1989,87 +1820,71 @@ async def on_message(
 
         return
 
-    # ========================================================
+    # --------------------------------------------------------
     # PROTECTION
-    # ========================================================
+    # --------------------------------------------------------
+
+    protection = settings.get(
+        "protection",
+        {}
+    )
+
+    # --------------------------------------------------------
+    # BADWORDS
+    # --------------------------------------------------------
 
     try:
 
-        # ----------------------------------------------------
-        # BADWORDS
-        # ----------------------------------------------------
-
         if protection.get(
             "badwords",
-            True,
+            True
         ):
 
-            badwords = await get_badwords(
-                gid
+            badwords = settings.get(
+                "compiled_badwords",
+                []
             )
 
-            if badwords:
+            for pattern, seconds in badwords:
 
-                content_lower = (
-                    message.content.lower()
-                )
+                if pattern.search(
+                    content_lower
+                ):
 
-                for word, seconds in badwords.items():
+                    try:
 
-                    word = str(
-                        word
-                    ).strip()
+                        await message.delete()
 
-                    if not word:
+                    except discord.HTTPException:
+                        pass
 
-                        continue
+                    try:
 
-                    pattern = (
-                        r"(?<!\w)"
-                        + re.escape(
-                            word.lower()
+                        await message.author.timeout(
+                            timedelta(
+                                seconds=int(seconds)
+                            ),
+                            reason="Forbidden word"
                         )
-                        + r"(?!\w)"
-                    )
 
-                    if re.search(
-                        pattern,
-                        content_lower,
-                    ):
+                    except discord.HTTPException:
+                        pass
 
-                        try:
+                    try:
 
-                            await message.delete()
-
-                            await message.author.timeout(
-
-                                timedelta(
-                                    seconds=int(
-                                        seconds
-                                    )
-                                ),
-
-                                reason="Forbidden word",
-                            )
-
-                            await message.channel.send(
-
+                        await message.channel.send(
+                            (
                                 f"⛔ "
                                 f"{message.author.mention} "
-                                f"has been timed out "
-                                f"for using forbidden words.",
+                                "has been timed out for using forbidden words."
+                            ),
+                            delete_after=5
+                        )
 
-                                delete_after=5,
-                            )
+                    except discord.HTTPException:
+                        pass
 
-                        except Exception as e:
-
-                            print(
-                                "Badword action error:",
-                                e,
-                            )
-
-                        break
+                    break
 
         # ----------------------------------------------------
         # LINK PROTECTION
@@ -2077,12 +1892,8 @@ async def on_message(
 
         if protection.get(
             "links",
-            True,
+            True
         ):
-
-            content_lower = (
-                message.content.lower()
-            )
 
             if (
                 "http://" in content_lower
@@ -2094,22 +1905,22 @@ async def on_message(
 
                     await message.delete()
 
+                except discord.HTTPException:
+                    pass
+
+                try:
+
                     await message.channel.send(
-
-                        f"🚫 "
-                        f"{message.author.mention} "
-                        f"Links are not allowed "
-                        f"in this server!",
-
-                        delete_after=5,
+                        (
+                            f"🚫 "
+                            f"{message.author.mention} "
+                            "Links are not allowed in this server!"
+                        ),
+                        delete_after=5
                     )
 
-                except Exception as e:
-
-                    print(
-                        "Link protection error:",
-                        e,
-                    )
+                except discord.HTTPException:
+                    pass
 
         # ----------------------------------------------------
         # ANTI SPAM
@@ -2117,12 +1928,12 @@ async def on_message(
 
         if protection.get(
             "antispam",
-            True,
+            True
         ):
 
             key = (
                 gid,
-                uid,
+                uid
             )
 
             now = time.monotonic()
@@ -2132,57 +1943,47 @@ async def on_message(
             )
 
             if history is None:
-
                 history = []
 
-                spam_cache[key] = history
-
-            history.append(
-                now
-            )
+            history.append(now)
 
             cutoff = now - 3
 
-            spam_cache[key] = [
-
+            history = [
                 timestamp
-
                 for timestamp in history
-
                 if timestamp >= cutoff
             ]
 
-            if len(
-                spam_cache[key]
-            ) >= 5:
+            spam_cache[key] = history
+
+            if len(history) >= 5:
 
                 try:
 
                     await message.author.timeout(
-
                         timedelta(
                             minutes=10
                         ),
-
-                        reason="Spamming",
+                        reason="Spamming"
                     )
+
+                except discord.HTTPException:
+                    pass
+
+                try:
 
                     await message.channel.send(
-
-                        f"⏱ "
-                        f"{message.author.mention} "
-                        f"You have been timed out "
-                        f"for spamming.",
-
-                        delete_after=5,
+                        (
+                            f"⏱ "
+                            f"{message.author.mention} "
+                            "You have been timed out for spamming."
+                        ),
+                        delete_after=5
                     )
 
-                except Exception as e:
-
-                    print(
-                        "Spam error:",
-                        e,
-                    )
+                except discord.HTTPException:
+                    pass
 
                 spam_cache[key] = []
 
@@ -2190,12 +1991,12 @@ async def on_message(
 
         print(
             "Protection error:",
-            e,
+            repr(e)
         )
 
-    # ========================================================
-    # PREFIX COMMANDS
-    # ========================================================
+    # --------------------------------------------------------
+    # COMMAND PROCESSING
+    # --------------------------------------------------------
 
     await bot.process_commands(
         message
@@ -2203,34 +2004,31 @@ async def on_message(
 
 
 # ============================================================
-# LANGUAGE
+# LANGUAGE COMMAND
 # ============================================================
 
 @bot.tree.command(
     name="language",
-    description="Set your personal language",
+    description="Set your personal language"
 )
 @app_commands.describe(
     lang="Choose your language"
 )
 @app_commands.choices(
-
     lang=[
-
         app_commands.Choice(
             name="English",
-            value="en",
+            value="en"
         ),
-
         app_commands.Choice(
             name="العربية",
-            value="ar",
-        ),
+            value="ar"
+        )
     ]
 )
 async def set_language(
     interaction: discord.Interaction,
-    lang: str,
+    lang: str
 ):
 
     uid = str(
@@ -2240,148 +2038,126 @@ async def set_language(
     try:
 
         await db.execute(
-
             """
             INSERT INTO user_settings
-            (user_id, lang)
-
+            (
+                user_id,
+                lang
+            )
             VALUES (?, ?)
 
             ON CONFLICT(user_id)
-
             DO UPDATE SET
                 lang=excluded.lang
             """,
-
             (
                 uid,
-                lang,
-            ),
+                lang
+            )
         )
 
         await db.commit()
 
-        await interaction.response.send_message(
+        language_cache[uid] = lang
 
+        await interaction.response.send_message(
             await t(
                 uid,
-                "lang_set",
+                "lang_set"
             ),
-
-            ephemeral=True,
+            ephemeral=True
         )
 
     except Exception as e:
 
         print(
             "Language error:",
-            e,
+            repr(e)
         )
 
         await interaction.response.send_message(
-
             "❌ Failed to change language.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
 # ============================================================
-# PROTECTION
+# PROTECTION COMMAND
 # ============================================================
 
 @bot.tree.command(
     name="protection",
-    description="Configure server protection",
+    description="Configure server protection"
 )
 @app_commands.default_permissions(
     manage_guild=True
 )
 @app_commands.describe(
     feature="Protection feature",
-    status="on or off",
+    status="on or off"
 )
 async def protection_config(
     interaction: discord.Interaction,
     feature: str,
-    status: str,
+    status: str
 ):
 
     feature = feature.lower().strip()
 
     status = status.lower().strip()
 
-    allowed = {
+    if feature not in {
         "badwords",
         "links",
-        "antispam",
-    }
-
-    if feature not in allowed:
+        "antispam"
+    }:
 
         await interaction.response.send_message(
-
-            "❌ Available features: "
-            "`badwords`, `links`, `antispam`",
-
-            ephemeral=True,
+            "❌ Available features: `badwords`, `links`, `antispam`",
+            ephemeral=True
         )
 
         return
 
     if status not in {
         "on",
-        "off",
+        "off"
     }:
 
         await interaction.response.send_message(
-
             "❌ Status must be `on` or `off`.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
-    enabled = (
-        status == "on"
-    )
-
     try:
 
         await update_settings(
-
-            str(
-                interaction.guild.id
-            ),
-
+            str(interaction.guild.id),
             {
                 f"protection.{feature}":
-                    enabled
-            },
+                    status == "on"
+            }
         )
 
         await interaction.response.send_message(
-
             f"🛡️ `{feature}` ➜ `{status}`",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
     except Exception as e:
 
         print(
             "Protection config error:",
-            e,
+            repr(e)
         )
 
         if not interaction.response.is_done():
 
             await interaction.response.send_message(
-
                 "❌ Failed to update protection.",
-
-                ephemeral=True,
+                ephemeral=True
             )
 
 
@@ -2397,91 +2173,77 @@ async def help_command(
 ):
 
     await ctx.send(
-
         embed=build_main_embed(),
-
-        view=HelpView(),
+        view=HelpView()
     )
 
-
-# ============================================================
-# COMMANDS
-# ============================================================
 
 @bot.tree.command(
     name="commands",
-    description="Display Lunex commands",
+    description="Display Lunex commands"
 )
 async def commands_list(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     await interaction.response.send_message(
-
         embed=build_main_embed(),
-
         view=HelpView(),
-
-        ephemeral=True,
+        ephemeral=True
     )
 
 
 # ============================================================
-# XP HELPER
+# XP DATABASE
 # ============================================================
 
 async def get_user_messages(
     guild_id: str,
-    user_id: str,
+    user_id: str
 ):
 
     async with db.execute(
-
         """
         SELECT messages
         FROM xp
         WHERE guild_id=?
         AND user_id=?
         """,
-
         (
             guild_id,
-            user_id,
-        ),
-
+            user_id
+        )
     ) as cursor:
 
         row = await cursor.fetchone()
 
     pending = xp_pending.get(
-
         (
             guild_id,
-            user_id,
+            user_id
         ),
-
-        {},
+        {}
     )
 
-    messages = (
-
-        (
-            row[0]
-            if row
-            else 0
-        )
-
-        + pending.get(
-            "messages",
-            0,
-        )
+    database_messages = (
+        row[0]
+        if row
+        else 0
     )
 
-    return messages
+    pending_messages = pending.get(
+        "messages",
+        0
+    )
+
+    return (
+        database_messages
+        + pending_messages
+    )
 
 
 # ============================================================
-# PREFIX XP
+# XP COMMAND
 # ============================================================
 
 @bot.command(
@@ -2491,83 +2253,56 @@ async def xp(
     ctx
 ):
 
-    guild_id = str(
-        ctx.guild.id
-    )
-
-    user_id = str(
-        ctx.author.id
-    )
+    if not ctx.guild:
+        return
 
     messages = await get_user_messages(
-        guild_id,
-        user_id,
-    )
-
-    embed = discord.Embed(
-
-        title="⭐ XP",
-
-        description=f"`{messages}`",
-
-        color=COLOR,
+        str(ctx.guild.id),
+        str(ctx.author.id)
     )
 
     await ctx.send(
-        embed=embed
+        embed=discord.Embed(
+            title="⭐ XP",
+            description=f"`{messages}`",
+            color=COLOR
+        )
     )
 
 
-# ============================================================
-# SLASH XP
-# ============================================================
-
 @bot.tree.command(
     name="xp",
-    description="Check your XP",
+    description="Check your XP"
 )
 async def slash_xp(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     if not interaction.guild:
 
         await interaction.response.send_message(
-
             "This command can only be used in a server.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
     messages = await get_user_messages(
-
-        str(
-            interaction.guild.id
-        ),
-
-        str(
-            interaction.user.id
-        ),
-    )
-
-    embed = discord.Embed(
-
-        title="⭐ XP",
-
-        description=f"`{messages}`",
-
-        color=COLOR,
+        str(interaction.guild.id),
+        str(interaction.user.id)
     )
 
     await interaction.response.send_message(
-        embed=embed
+        embed=discord.Embed(
+            title="⭐ XP",
+            description=f"`{messages}`",
+            color=COLOR
+        )
     )
 
 
 # ============================================================
-# PREFIX LEVEL
+# LEVEL
 # ============================================================
 
 @bot.command(
@@ -2577,144 +2312,89 @@ async def level(
     ctx
 ):
 
-    guild_id = str(
-        ctx.guild.id
-    )
-
-    user_id = str(
-        ctx.author.id
-    )
+    if not ctx.guild:
+        return
 
     messages = await get_user_messages(
-
-        guild_id,
-
-        user_id,
-    )
-
-    current_level = (
-        messages // 50
-    )
-
-    embed = discord.Embed(
-
-        title="📊 LEVEL",
-
-        description=f"`{current_level}`",
-
-        color=COLOR,
+        str(ctx.guild.id),
+        str(ctx.author.id)
     )
 
     await ctx.send(
-        embed=embed
+        embed=discord.Embed(
+            title="📊 LEVEL",
+            description=f"`{messages // 50}`",
+            color=COLOR
+        )
     )
 
 
-# ============================================================
-# SLASH LEVEL
-# ============================================================
-
 @bot.tree.command(
     name="level",
-    description="Check your level",
+    description="Check your level"
 )
 async def slash_level(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     if not interaction.guild:
 
         await interaction.response.send_message(
-
             "This command can only be used in a server.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
     messages = await get_user_messages(
-
-        str(
-            interaction.guild.id
-        ),
-
-        str(
-            interaction.user.id
-        ),
-    )
-
-    current_level = (
-        messages // 50
-    )
-
-    embed = discord.Embed(
-
-        title="📊 LEVEL",
-
-        description=f"`{current_level}`",
-
-        color=COLOR,
+        str(interaction.guild.id),
+        str(interaction.user.id)
     )
 
     await interaction.response.send_message(
-        embed=embed
+        embed=discord.Embed(
+            title="📊 LEVEL",
+            description=f"`{messages // 50}`",
+            color=COLOR
+        )
     )
 
 
 # ============================================================
 # /ME
-# بدل !i
 # ============================================================
 
 @bot.tree.command(
     name="me",
-    description="View your profile",
+    description="View your profile"
 )
 @app_commands.describe(
     member="Optional member"
 )
 async def me(
     interaction: discord.Interaction,
-    member: discord.Member = None,
+    member: discord.Member = None
 ):
 
     if not interaction.guild:
 
         await interaction.response.send_message(
-
             "This command can only be used in a server.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
-    member = (
-        member
-        or interaction.user
-    )
+    member = member or interaction.user
 
     messages = await get_user_messages(
-
-        str(
-            interaction.guild.id
-        ),
-
-        str(
-            member.id
-        ),
-    )
-
-    level_value = (
-        messages // 50
+        str(interaction.guild.id),
+        str(member.id)
     )
 
     embed = discord.Embed(
-
         title=f"Profile: {member.name}",
-
-        color=COLOR,
+        color=COLOR
     )
 
     embed.set_thumbnail(
@@ -2722,39 +2402,27 @@ async def me(
     )
 
     embed.add_field(
-
         name="⭐ XP",
-
         value=f"`{messages}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="📊 Level",
-
-        value=f"`{level_value}`",
-
-        inline=True,
+        value=f"`{messages // 50}`",
+        inline=True
     )
 
     embed.add_field(
-
         name="👑 Top Role",
-
         value=member.top_role.mention,
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="🆔 User ID",
-
         value=f"`{member.id}`",
-
-        inline=False,
+        inline=False
     )
 
     await interaction.response.send_message(
@@ -2764,31 +2432,25 @@ async def me(
 
 # ============================================================
 # /PROFILE
-# بدل !افاتار
 # ============================================================
 
 @bot.tree.command(
     name="profile",
-    description="View a member's avatar",
+    description="View a member's avatar"
 )
 @app_commands.describe(
     member="Select a member"
 )
 async def profile(
     interaction: discord.Interaction,
-    member: discord.Member = None,
+    member: discord.Member = None
 ):
 
-    member = (
-        member
-        or interaction.user
-    )
+    member = member or interaction.user
 
     embed = discord.Embed(
-
         title=f"Avatar: {member.name}",
-
-        color=COLOR,
+        color=COLOR
     )
 
     embed.set_image(
@@ -2806,15 +2468,14 @@ async def profile(
 
 # ============================================================
 # /SERVER
-# بدل !سيرفر
 # ============================================================
 
 @bot.tree.command(
     name="server",
-    description="View server information",
+    description="View server information"
 )
 async def server(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     guild = interaction.guild
@@ -2822,37 +2483,27 @@ async def server(
     if not guild:
 
         await interaction.response.send_message(
-
             "This command can only be used inside a server.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
     bots_count = sum(
-
         1
-
         for member in guild.members
-
         if member.bot
     )
 
     humans_count = (
-
         guild.member_count - bots_count
-
         if guild.member_count
-
         else 0
     )
 
     embed = discord.Embed(
-
         title=f"🖥 {guild.name}",
-
-        color=COLOR,
+        color=COLOR
     )
 
     if guild.icon:
@@ -2862,74 +2513,52 @@ async def server(
         )
 
     embed.add_field(
-
         name="👥 Members",
-
         value=f"`{guild.member_count}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="👤 Humans",
-
         value=f"`{humans_count}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="🤖 Bots",
-
         value=f"`{bots_count}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="💬 Channels",
-
         value=f"`{len(guild.channels)}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="🎭 Roles",
-
         value=f"`{len(guild.roles)}`",
-
-        inline=True,
+        inline=True
     )
 
     embed.add_field(
-
         name="📅 Created",
-
         value=(
             f"`{guild.created_at.strftime('%Y-%m-%d')}`"
         ),
-
-        inline=True,
+        inline=True
     )
 
     if guild.owner:
 
         embed.add_field(
-
             name="👑 Owner",
-
             value=guild.owner.mention,
-
-            inline=True,
+            inline=True
         )
 
     embed.set_footer(
-
         text=f"Lunex • Server ID: {guild.id}"
     )
 
@@ -2939,7 +2568,7 @@ async def server(
 
 
 # ============================================================
-# LEADERBOARD
+# TOP LEADERBOARD
 # ============================================================
 
 @bot.command(
@@ -2947,16 +2576,21 @@ async def server(
 )
 async def top_command(
     ctx,
-    mode: str = None,
+    mode: str = None
 ):
+
+    if not ctx.guild:
+        return
 
     gid = str(
         ctx.guild.id
     )
 
-    if mode:
-
-        mode = mode.lower().strip()
+    mode = (
+        mode.lower().strip()
+        if mode
+        else ""
+    )
 
     if mode == "day":
 
@@ -2978,41 +2612,26 @@ async def top_command(
 
     await flush_xp()
 
-    query = f"""
-
-        SELECT
-            user_id,
-            {column}
-
+    async with db.execute(
+        f"""
+        SELECT user_id, {column}
         FROM xp
 
         WHERE guild_id=?
-
         AND {column}>0
 
         ORDER BY {column} DESC
 
         LIMIT 10
-
-    """
-
-    async with db.execute(
-
-        query,
-
-        (
-            gid,
-        ),
-
+        """,
+        (gid,)
     ) as cursor:
 
         rows = await cursor.fetchall()
 
     embed = discord.Embed(
-
         title=title,
-
-        color=COLOR,
+        color=COLOR
     )
 
     if not rows:
@@ -3025,25 +2644,16 @@ async def top_command(
 
         for index, (
             user_id,
-            count,
+            count
         ) in enumerate(
-
             rows,
-
-            start=1,
+            start=1
         ):
 
             embed.add_field(
-
-                name=(
-                    f"{index}. <@{user_id}>"
-                ),
-
-                value=(
-                    f"💬 {count} messages"
-                ),
-
-                inline=False,
+                name=f"{index}. <@{user_id}>",
+                value=f"💬 {count} messages",
+                inline=False
             )
 
     await ctx.send(
@@ -3063,8 +2673,11 @@ async def top_command(
 )
 async def records_command(
     ctx,
-    member: discord.Member = None,
+    member: discord.Member = None
 ):
+
+    if not ctx.guild:
+        return
 
     member = (
         member
@@ -3072,19 +2685,17 @@ async def records_command(
     )
 
     async with db.execute(
-
         """
         SELECT warns
         FROM warns
+
         WHERE guild_id=?
         AND user_id=?
         """,
-
         (
             str(ctx.guild.id),
-            str(member.id),
-        ),
-
+            str(member.id)
+        )
     ) as cursor:
 
         row = await cursor.fetchone()
@@ -3096,16 +2707,11 @@ async def records_command(
     )
 
     embed = discord.Embed(
-
-        title=(
-            f"📋 Records for {member.name}"
-        ),
-
+        title=f"📋 Records for {member.name}",
         description=(
             f"⚠️ Warnings: {warnings}"
         ),
-
-        color=COLOR,
+        color=COLOR
     )
 
     await ctx.send(
@@ -3119,37 +2725,44 @@ async def records_command(
 
 @bot.command(
     name="clear",
-    aliases=["مسح"],
+    aliases=["مسح"]
 )
 @commands.has_permissions(
     manage_messages=True
 )
 async def clear(
     ctx,
-    amount: int,
+    amount: int
 ):
 
     if amount <= 0:
         return
 
-    if amount > 100:
-
-        amount = 100
-
-    uid = str(
-        ctx.author.id
+    amount = min(
+        amount,
+        100
     )
 
-    await ctx.channel.purge(
-        limit=amount + 1
-    )
+    try:
+
+        await ctx.channel.purge(
+            limit=amount + 1
+        )
+
+    except discord.Forbidden:
+
+        await ctx.send(
+            "❌ I don't have permission to delete messages.",
+            delete_after=5
+        )
+
+        return
 
     msg = await ctx.send(
-
         await t(
-            uid,
+            str(ctx.author.id),
             "cleared",
-            amount,
+            amount
         )
     )
 
@@ -3160,7 +2773,6 @@ async def clear(
         await msg.delete()
 
     except Exception:
-
         pass
 
 
@@ -3170,49 +2782,40 @@ async def clear(
 
 @bot.tree.command(
     name="ban",
-    description="Ban a member",
+    description="Ban a member"
 )
 @app_commands.default_permissions(
     ban_members=True
 )
 async def ban(
     interaction: discord.Interaction,
-    member: discord.Member,
+    member: discord.Member
 ):
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
     try:
 
         await member.ban(
-
-            reason=(
-                f"Banned by {interaction.user}"
-            )
+            reason=f"Banned by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
-                str(
-                    interaction.user.id
-                ),
-                "banned",
+                str(interaction.user.id),
+                "banned"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to ban this member.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3222,49 +2825,40 @@ async def ban(
 
 @bot.tree.command(
     name="kick",
-    description="Kick a member",
+    description="Kick a member"
 )
 @app_commands.default_permissions(
     kick_members=True
 )
 async def kick(
     interaction: discord.Interaction,
-    member: discord.Member,
+    member: discord.Member
 ):
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
     try:
 
         await member.kick(
-
-            reason=(
-                f"Kicked by {interaction.user}"
-            )
+            reason=f"Kicked by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
-                str(
-                    interaction.user.id
-                ),
-                "kicked",
+                str(interaction.user.id),
+                "kicked"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to kick this member.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3274,14 +2868,14 @@ async def kick(
 
 @bot.tree.command(
     name="unban",
-    description="Unban a user by ID",
+    description="Unban a user by ID"
 )
 @app_commands.default_permissions(
     ban_members=True
 )
 async def unban(
     interaction: discord.Interaction,
-    user_id: str,
+    user_id: str
 ):
 
     uid = str(
@@ -3299,20 +2893,17 @@ async def unban(
         )
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "unbanned",
+                "unbanned"
             )
         )
 
     except Exception as e:
 
         await interaction.response.send_message(
-
             f"{await t(uid, 'error')} `{e}`",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3322,13 +2913,13 @@ async def unban(
 
 @bot.tree.command(
     name="lock",
-    description="Lock channel",
+    description="Lock channel"
 )
 @app_commands.default_permissions(
     manage_channels=True
 )
 async def lock_slash(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     overwrite = (
@@ -3340,19 +2931,14 @@ async def lock_slash(
     overwrite.send_messages = False
 
     await interaction.channel.set_permissions(
-
         interaction.guild.default_role,
-
-        overwrite=overwrite,
+        overwrite=overwrite
     )
 
     await interaction.response.send_message(
-
         await t(
-            str(
-                interaction.user.id
-            ),
-            "channel_locked",
+            str(interaction.user.id),
+            "channel_locked"
         )
     )
 
@@ -3363,13 +2949,13 @@ async def lock_slash(
 
 @bot.tree.command(
     name="open",
-    description="Unlock channel",
+    description="Unlock channel"
 )
 @app_commands.default_permissions(
     manage_channels=True
 )
 async def open_slash(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction
 ):
 
     overwrite = (
@@ -3381,19 +2967,14 @@ async def open_slash(
     overwrite.send_messages = True
 
     await interaction.channel.set_permissions(
-
         interaction.guild.default_role,
-
-        overwrite=overwrite,
+        overwrite=overwrite
     )
 
     await interaction.response.send_message(
-
         await t(
-            str(
-                interaction.user.id
-            ),
-            "channel_unlocked",
+            str(interaction.user.id),
+            "channel_unlocked"
         )
     )
 
@@ -3404,7 +2985,7 @@ async def open_slash(
 
 @bot.tree.command(
     name="timeout",
-    description="Timeout a member",
+    description="Timeout a member"
 )
 @app_commands.default_permissions(
     moderate_members=True
@@ -3412,7 +2993,7 @@ async def open_slash(
 async def timeout(
     interaction: discord.Interaction,
     member: discord.Member,
-    time: str,
+    time: str
 ):
 
     uid = str(
@@ -3421,9 +3002,8 @@ async def timeout(
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
     seconds = parse_time(
@@ -3433,25 +3013,20 @@ async def timeout(
     if not seconds:
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "invalid_time",
+                "invalid_time"
             ),
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
 
-    # Discord timeout maximum is 28 days
     if seconds > 28 * 86400:
 
         await interaction.response.send_message(
-
             "❌ Timeout cannot be longer than 28 days.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3459,31 +3034,24 @@ async def timeout(
     try:
 
         await member.timeout(
-
             timedelta(
                 seconds=seconds
             ),
-
-            reason=(
-                f"Timeout by {interaction.user}"
-            ),
+            reason=f"Timeout by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "timeout_applied",
+                "timeout_applied"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to timeout this member.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3493,14 +3061,14 @@ async def timeout(
 
 @bot.tree.command(
     name="timeout_remove",
-    description="Remove timeout",
+    description="Remove timeout"
 )
 @app_commands.default_permissions(
     moderate_members=True
 )
 async def timeout_remove(
     interaction: discord.Interaction,
-    member: discord.Member,
+    member: discord.Member
 ):
 
     uid = str(
@@ -3509,9 +3077,8 @@ async def timeout_remove(
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
     try:
@@ -3521,20 +3088,17 @@ async def timeout_remove(
         )
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "timeout_removed",
+                "timeout_removed"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to remove the timeout.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3544,7 +3108,7 @@ async def timeout_remove(
 
 @bot.tree.command(
     name="add_role",
-    description="Add a role",
+    description="Add a role"
 )
 @app_commands.default_permissions(
     manage_roles=True
@@ -3552,23 +3116,22 @@ async def timeout_remove(
 async def add_role(
     interaction: discord.Interaction,
     member: discord.Member,
-    role: discord.Role,
+    role: discord.Role
 ):
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
-    if role >= interaction.guild.me.top_role:
+    me = interaction.guild.me
+
+    if role >= me.top_role:
 
         await interaction.response.send_message(
-
             "That role is higher than or equal to my role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3579,10 +3142,8 @@ async def add_role(
     ):
 
         await interaction.response.send_message(
-
             "That role is higher than or equal to your role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3590,31 +3151,22 @@ async def add_role(
     try:
 
         await member.add_roles(
-
             role,
-
-            reason=(
-                f"Role added by {interaction.user}"
-            ),
+            reason=f"Role added by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
-                str(
-                    interaction.user.id
-                ),
-                "role_added",
+                str(interaction.user.id),
+                "role_added"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to add this role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3624,7 +3176,7 @@ async def add_role(
 
 @bot.tree.command(
     name="remove_role",
-    description="Remove a role",
+    description="Remove a role"
 )
 @app_commands.default_permissions(
     manage_roles=True
@@ -3632,23 +3184,22 @@ async def add_role(
 async def remove_role(
     interaction: discord.Interaction,
     member: discord.Member,
-    role: discord.Role,
+    role: discord.Role
 ):
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
-    if role >= interaction.guild.me.top_role:
+    me = interaction.guild.me
+
+    if role >= me.top_role:
 
         await interaction.response.send_message(
-
             "That role is higher than or equal to my role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3659,10 +3210,8 @@ async def remove_role(
     ):
 
         await interaction.response.send_message(
-
             "That role is higher than or equal to your role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3670,31 +3219,22 @@ async def remove_role(
     try:
 
         await member.remove_roles(
-
             role,
-
-            reason=(
-                f"Role removed by {interaction.user}"
-            ),
+            reason=f"Role removed by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
-                str(
-                    interaction.user.id
-                ),
-                "role_removed",
+                str(interaction.user.id),
+                "role_removed"
             )
         )
 
     except discord.Forbidden:
 
         await interaction.response.send_message(
-
             "❌ I don't have permission to remove this role.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3704,11 +3244,11 @@ async def remove_role(
 
 @bot.tree.command(
     name="nickname",
-    description="Change a member nickname",
+    description="Change a member nickname"
 )
 @app_commands.describe(
     member="Select member",
-    nickname="New nickname",
+    nickname="New nickname"
 )
 @app_commands.default_permissions(
     manage_nicknames=True
@@ -3716,7 +3256,7 @@ async def remove_role(
 async def nickname(
     interaction: discord.Interaction,
     member: discord.Member,
-    nickname: str = None,
+    nickname: str = None
 ):
 
     uid = str(
@@ -3725,37 +3265,29 @@ async def nickname(
 
     if not await check_hierarchy(
         interaction,
-        member,
+        member
     ):
-
         return
 
     try:
 
         await member.edit(
-
             nick=nickname,
-
-            reason=(
-                f"Nickname changed by {interaction.user}"
-            ),
+            reason=f"Nickname changed by {interaction.user}"
         )
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "nick_changed",
+                "nick_changed"
             )
         )
 
     except Exception as e:
 
         await interaction.response.send_message(
-
             f"{await t(uid, 'error')} `{e}`",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3765,19 +3297,19 @@ async def nickname(
 
 @bot.tree.command(
     name="badword",
-    description="Add a banned word",
+    description="Add a banned word"
 )
 @app_commands.default_permissions(
     manage_guild=True
 )
 @app_commands.describe(
     word="Word to block",
-    time="Timeout duration, e.g. 10m or 1h",
+    time="Timeout duration, e.g. 10m or 1h"
 )
 async def badword(
     interaction: discord.Interaction,
     word: str,
-    time: str,
+    time: str
 ):
 
     uid = str(
@@ -3791,13 +3323,11 @@ async def badword(
     if not seconds:
 
         await interaction.response.send_message(
-
             await t(
                 uid,
-                "invalid_time",
+                "invalid_time"
             ),
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3807,10 +3337,8 @@ async def badword(
     if not word:
 
         await interaction.response.send_message(
-
             "❌ Invalid word.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3822,54 +3350,41 @@ async def badword(
     try:
 
         await guild_settings.update_one(
-
             {
                 "guildId": gid
             },
-
             {
                 "$set": {
                     f"badwords.{word}":
                         seconds
                 },
-
                 "$setOnInsert": {
                     "guildId": gid
-                },
+                }
             },
-
-            upsert=True,
-        )
-
-        badword_cache.pop(
-            gid,
-            None,
+            upsert=True
         )
 
         settings_cache.pop(
             gid,
-            None,
+            None
         )
 
         await interaction.response.send_message(
-
             f"✅ Added `{word}`.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
     except Exception as e:
 
         print(
             "Badword error:",
-            e,
+            repr(e)
         )
 
         await interaction.response.send_message(
-
             "❌ Failed to add bad word.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
@@ -3879,19 +3394,19 @@ async def badword(
 
 @bot.tree.command(
     name="auto_reply",
-    description="Add automatic reply",
+    description="Add automatic reply"
 )
 @app_commands.default_permissions(
     manage_guild=True
 )
 @app_commands.describe(
     trigger="Trigger message",
-    reply="Automatic reply",
+    reply="Automatic reply"
 )
 async def auto_reply(
     interaction: discord.Interaction,
     trigger: str,
-    reply: str,
+    reply: str
 ):
 
     trigger = trigger.strip()
@@ -3901,10 +3416,8 @@ async def auto_reply(
     if not trigger or not reply:
 
         await interaction.response.send_message(
-
             "❌ Trigger and reply cannot be empty.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
         return
@@ -3916,321 +3429,241 @@ async def auto_reply(
     try:
 
         await guild_settings.update_one(
-
             {
                 "guildId": gid
             },
-
             {
                 "$push": {
-
                     "autoReplies": {
-
                         "message": trigger,
-
-                        "reply": reply,
+                        "reply": reply
                     }
                 },
-
                 "$setOnInsert": {
-
                     "guildId": gid
-                },
+                }
             },
-
-            upsert=True,
+            upsert=True
         )
 
         settings_cache.pop(
             gid,
-            None,
+            None
         )
 
         await interaction.response.send_message(
-
             f"✅ Auto-reply added for `{trigger}`.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
     except Exception as e:
 
         print(
             "Auto reply error:",
-            e,
+            repr(e)
         )
 
         await interaction.response.send_message(
-
             "❌ Failed to add auto-reply.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
 # ============================================================
-# REMOVE AUTO REPLY
+# AUTO REPLY REMOVE
 # ============================================================
 
 @bot.tree.command(
     name="auto_reply_remove",
-    description="Remove an automatic reply",
+    description="Remove an automatic reply"
 )
 @app_commands.default_permissions(
     manage_guild=True
 )
 @app_commands.describe(
-    trigger="Trigger message to remove",
+    trigger="Trigger message to remove"
 )
 async def auto_reply_remove(
     interaction: discord.Interaction,
-    trigger: str,
+    trigger: str
 ):
 
     gid = str(
         interaction.guild.id
     )
 
+    trigger = trigger.strip()
+
     try:
 
         result = await guild_settings.update_one(
-
             {
                 "guildId": gid
             },
-
             {
                 "$pull": {
-
                     "autoReplies": {
-
                         "message": trigger
                     }
                 }
-            },
+            }
         )
 
         settings_cache.pop(
             gid,
-            None,
+            None
         )
 
         if result.modified_count == 0:
 
             await interaction.response.send_message(
-
                 "⚠️ Auto-reply not found.",
-
-                ephemeral=True,
+                ephemeral=True
             )
 
             return
 
         await interaction.response.send_message(
-
             "✅ Auto-reply deleted.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
     except Exception as e:
 
         print(
             "Auto reply remove error:",
-            e,
+            repr(e)
         )
 
         await interaction.response.send_message(
-
             "❌ Failed to remove auto-reply.",
-
-            ephemeral=True,
+            ephemeral=True
         )
 
 
 # ============================================================
-# POST TICKET PANEL
-# ============================================================
-
-async def post_ticket_panel(
-    guild_id: str,
-    channel_id: str,
-):
-
-    guild = bot.get_guild(
-        int(guild_id)
-    )
-
-    if not guild:
-
-        raise ValueError(
-            "Bot is not in this server"
-        )
-
-    channel = guild.get_channel(
-        int(channel_id)
-    )
-
-    if not channel:
-
-        raise ValueError(
-            "Channel not found"
-        )
-
-    settings = await get_settings(
-        str(guild_id)
-    )
-
-    ticket = settings.get(
-        "ticket",
-        {},
-    )
-
-    embed = discord.Embed(
-
-        title="Ticket",
-
-        description=(
-
-            ticket.get(
-                "message"
-            )
-
-            or
-
-            "Click the button below to open a new ticket."
-        ),
-
-        color=COLOR,
-    )
-
-    image = ticket.get(
-        "image"
-    )
-
-    if image:
-
-        embed.set_image(
-            url=image
-        )
-
-    await channel.send(
-
-        embed=embed,
-
-        view=TicketView(),
-    )
-
-
-# ============================================================
-# BOT COMMAND ERROR
+# ERROR HANDLING
 # ============================================================
 
 @bot.event
 async def on_command_error(
     ctx,
-    error,
+    error
 ):
 
     if isinstance(
         error,
-        commands.CommandNotFound,
+        commands.CommandNotFound
     ):
 
         return
 
     if isinstance(
         error,
-        commands.MissingPermissions,
+        commands.MissingPermissions
     ):
 
         await ctx.send(
-
             "❌ You don't have permission to use this command.",
-
-            delete_after=5,
+            delete_after=5
         )
 
         return
 
     if isinstance(
         error,
-        commands.MissingRequiredArgument,
+        commands.MissingRequiredArgument
     ):
 
         await ctx.send(
-
             "❌ Missing required argument.",
-
-            delete_after=5,
+            delete_after=5
         )
 
         return
 
     if isinstance(
         error,
-        commands.BadArgument,
+        commands.BadArgument
     ):
 
         await ctx.send(
-
             "❌ Invalid argument.",
-
-            delete_after=5,
+            delete_after=5
         )
 
         return
 
     print(
         "Command error:",
-        repr(error),
+        repr(error)
     )
 
 
 # ============================================================
-# SLASH ERROR HANDLER
+# BOT SETUP
 # ============================================================
 
-async def slash_error_handler(
-    interaction: discord.Interaction,
-    error,
-):
+async def setup_bot():
+
+    # --------------------------------------------------------
+    # Persistent Views
+    # --------------------------------------------------------
+
+    bot.add_view(
+        HelpView()
+    )
+
+    bot.add_view(
+        TicketView()
+    )
+
+    bot.add_view(
+        CloseTicketView()
+    )
 
     print(
-        "Slash command error:",
-        repr(error),
+        "✅ Persistent views registered"
     )
+
+    # --------------------------------------------------------
+    # Slash Commands
+    # --------------------------------------------------------
 
     try:
 
-        message = (
-            "❌ An error occurred."
+        synced = await bot.tree.sync()
+
+        print(
+            f"✅ Synced {len(synced)} slash command(s)"
         )
-
-        if interaction.response.is_done():
-
-            await interaction.followup.send(
-
-                message,
-
-                ephemeral=True,
-            )
-
-        else:
-
-            await interaction.response.send_message(
-
-                message,
-
-                ephemeral=True,
-            )
 
     except Exception as e:
 
         print(
-            "Slash error handler:",
-            e,
+            "❌ Command sync error:",
+            repr(e)
         )
+
+    # --------------------------------------------------------
+    # Background Tasks
+    # --------------------------------------------------------
+
+    asyncio.create_task(
+        xp_loop()
+    )
+
+    asyncio.create_task(
+        check_expired_premiums()
+    )
+
+    asyncio.create_task(
+        reset_leaderboards()
+    )
+
+    print(
+        "✅ Background tasks started"
+    )
 
 
 # ============================================================
@@ -4240,105 +3673,17 @@ async def slash_error_handler(
 @bot.event
 async def on_ready():
 
-    global _views_registered
-    global _commands_synced
-    global _background_started
-
-    # ========================================================
-    # SYNC SLASH COMMANDS
-    # ========================================================
-
-    if not _commands_synced:
-
-        try:
-
-            synced = await bot.tree.sync()
-
-            print(
-                f"✅ Synced {len(synced)} slash command(s)"
-            )
-
-            _commands_synced = True
-
-        except Exception as e:
-
-            print(
-                "❌ Command sync error:",
-                e,
-            )
-
-    # ========================================================
-    # REGISTER PERSISTENT VIEWS
-    # ========================================================
-
-    if not _views_registered:
-
-        try:
-
-            bot.add_view(
-                HelpView()
-            )
-
-            bot.add_view(
-                TicketView()
-            )
-
-            bot.add_view(
-                CloseTicketView()
-            )
-
-            _views_registered = True
-
-            print(
-                "✅ Persistent views registered"
-            )
-
-        except Exception as e:
-
-            print(
-                "❌ View registration error:",
-                e,
-            )
-
-    # ========================================================
-    # BACKGROUND TASKS
-    # ========================================================
-
-    if not _background_started:
-
-        asyncio.create_task(
-            xp_loop()
-        )
-
-        asyncio.create_task(
-            check_expired_premiums()
-        )
-
-        asyncio.create_task(
-            reset_leaderboards()
-        )
-
-        _background_started = True
-
-        print(
-            "✅ Background tasks started"
-        )
-
-    # ========================================================
-    # READY LOG
-    # ========================================================
-
-    print(
-        "=" * 50
-    )
+    print("=" * 55)
 
     print(
         f"✅ Lunex Bot Logged in as {bot.user}"
     )
 
-    print(
-        f"🆔 Bot ID: {bot.user.id}"
-    )
+    if bot.user:
+
+        print(
+            f"🆔 Bot ID: {bot.user.id}"
+        )
 
     print(
         f"🏠 Servers: {len(bot.guilds)}"
@@ -4348,13 +3693,11 @@ async def on_ready():
         "🚀 Lunex is ready!"
     )
 
-    print(
-        "=" * 50
-    )
+    print("=" * 55)
 
 
 # ============================================================
-# STARTUP
+# MAIN
 # ============================================================
 
 async def main():
@@ -4363,11 +3706,25 @@ async def main():
         "🚀 Starting Lunex Bot..."
     )
 
+    # --------------------------------------------------------
+    # Initialize databases BEFORE Discord connection
+    # --------------------------------------------------------
+
     await init_database()
 
     print(
-        "✅ SQLite database initialized"
+        "✅ Databases (SQLite & MongoDB) initialized"
     )
+
+    # --------------------------------------------------------
+    # Setup
+    # --------------------------------------------------------
+
+    await setup_bot()
+
+    # --------------------------------------------------------
+    # Start Discord
+    # --------------------------------------------------------
 
     try:
 
@@ -4376,6 +3733,25 @@ async def main():
         )
 
     finally:
+
+        print(
+            "🛑 Shutting down..."
+        )
+
+        # Flush remaining XP
+
+        try:
+
+            await flush_xp()
+
+        except Exception as e:
+
+            print(
+                "Final XP flush error:",
+                repr(e)
+            )
+
+        # Close SQLite
 
         if db:
 
@@ -4387,13 +3763,17 @@ async def main():
 
                 pass
 
-        try:
+        # Close MongoDB
 
-            mongo.close()
+        if mongo:
 
-        except Exception:
+            try:
 
-            pass
+                mongo.close()
+
+            except Exception:
+
+                pass
 
 
 # ============================================================
