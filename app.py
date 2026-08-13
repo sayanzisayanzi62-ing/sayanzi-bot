@@ -1,4 +1,6 @@
 import os
+import asyncio
+import bot as bot_module
 import threading
 from urllib.parse import urlencode
 
@@ -189,8 +191,7 @@ def post_ticket(guild_id):
 
 
 def run_bot():
-    bot.run(os.environ["DISCORD_BOT_TOKEN"])
-
+    asyncio.run(bot_module.main())	
 
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()

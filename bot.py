@@ -1,5 +1,5 @@
 # =========================================
-# LUNEX BOT — RAILWAY OPTIMIZED & MERGED EDITION
+# LUNEX BOT — RAILWAY OPTIMIZED EDITION
 # discord.py 2.x
 # MongoDB (Motor Async) + SQLite
 # =========================================
@@ -260,7 +260,11 @@ def build_message(
 # DISCORD INTENTS
 # =========================================
 
-intents = discord.Intents.all()
+intents = discord.Intents.default()
+
+intents.members = True
+intents.message_content = True
+intents.guilds = True
 
 
 bot = commands.Bot(
@@ -297,109 +301,109 @@ locales = {
     "en": {
 
         "lang_set":
-            "✅ Your personal language has been set to English.",
+            "Your personal language has been set to English.",
 
         "higher_bot":
-            "❌ Their role is higher than or equal to mine!",
+            "Their role is higher than or equal to mine!",
 
         "higher_user":
-            "❌ Their role is higher than or equal to yours!",
+            "Their role is higher than or equal to yours!",
 
         "banned":
-            "✅ Member banned successfully.",
+            "Member banned successfully.",
 
         "kicked":
-            "✅ Member kicked successfully.",
+            "Member kicked successfully.",
 
         "unbanned":
-            "✅ User unbanned.",
+            "User unbanned.",
 
         "invalid_time":
-            "❌ Invalid time format (e.g. 10m, 1h).",
+            "Invalid time format (e.g. 10m, 1h).",
 
         "timeout_applied":
-            "✅ Timeout applied successfully.",
+            "Timeout applied successfully.",
 
         "timeout_removed":
-            "✅ Timeout removed.",
+            "Timeout removed.",
 
         "channel_locked":
-            "🔒 Channel locked successfully.",
+            "Channel locked successfully.",
 
         "channel_unlocked":
-            "🔓 Channel unlocked successfully.",
+            "Channel unlocked successfully.",
 
         "role_added":
-            "✅ Role added successfully.",
+            "Role added successfully.",
 
         "role_removed":
-            "✅ Role removed successfully.",
+            "Role removed successfully.",
 
         "nick_changed":
-            "✅ Nickname changed successfully.",
+            "Nickname changed successfully.",
 
         "cleared":
-            "🧹 Cleared `{}` messages.",
+            "Cleared `{}` messages.",
 
         "error":
-            "❌ Error:"
+            "Error:"
     },
 
     "ar": {
 
         "lang_set":
-            "✅ تم تعيين لغتك الشخصية إلى العربية.",
+            "تم تعيين لغتك الشخصية إلى العربية.",
 
         "higher_bot":
-            "❌ رتبة هذا العضو أعلى من رتبتي أو مساوية لها!",
+            "رتبة هذا العضو أعلى من رتبتي أو مساوية لها!",
 
         "higher_user":
-            "❌ رتبة هذا العضو أعلى من رتبتك أو مساوية لها!",
+            "رتبة هذا العضو أعلى من رتبتك أو مساوية لها!",
 
         "banned":
-            "✅ تم حظر العضو بنجاح.",
+            "تم حظر العضو بنجاح.",
 
         "kicked":
-            "✅ تم طرد العضو بنجاح.",
+            "تم طرد العضو بنجاح.",
 
         "unbanned":
-            "✅ تم فك الحظر عن المستخدم.",
+            "تم فك الحظر عن المستخدم.",
 
         "invalid_time":
-            "❌ صيغة الوقت غير صحيحة، مثال: 10m أو 1h.",
+            "صيغة الوقت غير صحيحة، مثال: 10m أو 1h.",
 
         "timeout_applied":
-            "✅ تم إعطاء العضو تايم أوت بنجاح.",
+            "تم إعطاء العضو تايم أوت بنجاح.",
 
         "timeout_removed":
-            "✅ تم إزالة التايم أوت عن العضو.",
+            "تم إزالة التايم أوت عن العضو.",
 
         "channel_locked":
-            "🔒 تم قفل القناة بنجاح.",
+            "تم قفل القناة بنجاح.",
 
         "channel_unlocked":
-            "🔓 تم فتح القناة بنجاح.",
+            "تم فتح القناة بنجاح.",
 
         "role_added":
-            "✅ تم إعطاء الرتبة بنجاح.",
+            "تم إعطاء الرتبة بنجاح.",
 
         "role_removed":
-            "✅ تم سحب الرتبة بنجاح.",
+            "تم سحب الرتبة بنجاح.",
 
         "nick_changed":
-            "✅ تم تغيير اللقب بنجاح.",
+            "تم تغيير اللقب بنجاح.",
 
         "cleared":
-            "🧹 تم مسح `{}` رسالة.",
+            "تم مسح `{}` رسالة.",
 
         "error":
-            "❌ حدث خطأ:"
+            "حدث خطأ:"
     }
 }
 
 
 # =========================================
-# DATABASE (SQLite)
+# DATABASE
 # =========================================
 
 async def init_database():
@@ -599,8 +603,9 @@ class CloseTicketView(discord.ui.View):
         )
 
     @discord.ui.button(
-        label="Close Ticket 🔒",
+        label="Close Ticket",
         style=discord.ButtonStyle.danger,
+        emoji="🔒",
         custom_id="lunex_close_ticket"
     )
     async def close_ticket(
@@ -634,8 +639,9 @@ class TicketView(discord.ui.View):
         )
 
     @discord.ui.button(
-        label="Open Ticket 🎫",
+        label="Open Ticket",
         style=discord.ButtonStyle.primary,
+        emoji="🎫",
         custom_id="lunex_open_ticket"
     )
     async def open_ticket(
@@ -805,16 +811,16 @@ class HelpSelect(discord.ui.Select):
         if self.values[0] == "All member":
 
             embed = discord.Embed(
-                title="👥 __**ALL MEMBER COMMANDS**__",
+                title="👥 ALL MEMBER COMMANDS",
                 description=(
-                    f"**Everything available to every member.**\n\n"
-                    f"📌 **Visit us:** {SITE_URL}"
+                    f"Everything available to every member.\n\n"
+                    f"Visit us: {SITE_URL}"
                 ),
                 color=COLOR
             )
 
             embed.add_field(
-                name="__**⭐ XP & Leaderboards**__",
+                name="⭐ XP & Leaderboards",
                 value=(
                     "**!xp** / **/xp** — your XP\n"
                     "**!level** / **/level** — your level\n"
@@ -826,7 +832,7 @@ class HelpSelect(discord.ui.Select):
             )
 
             embed.add_field(
-                name="__**📌 Info**__",
+                name="📌 Info",
                 value=(
                     "**!i** `[member]` — profile\n"
                     "**!افاتار** `[member]` — avatar\n"
@@ -840,16 +846,16 @@ class HelpSelect(discord.ui.Select):
         else:
 
             embed = discord.Embed(
-                title="👑 __**STAFF MEMBER COMMANDS**__",
+                title="👑 STAFF MEMBER COMMANDS",
                 description=(
-                    f"**Moderation, security and server management.**\n\n"
-                    f"📌 **Visit us:** {SITE_URL}"
+                    f"Moderation, security and server management.\n\n"
+                    f"Visit us: {SITE_URL}"
                 ),
                 color=COLOR
             )
 
             embed.add_field(
-                name="__**🛡️ Moderation**__",
+                name="🛡️ Moderation",
                 value=(
                     "**/ban** | **/kick** | **/unban**\n"
                     "**/timeout** | **/timeout_remove**\n"
@@ -861,7 +867,7 @@ class HelpSelect(discord.ui.Select):
             )
 
             embed.add_field(
-                name="__**⚙️ Management**__",
+                name="⚙️ Management",
                 value=(
                     "**/add_role** | **/remove_role**\n"
                     "**/nickname**\n"
@@ -930,10 +936,10 @@ class HelpView(discord.ui.View):
 def build_main_embed():
 
     embed = discord.Embed(
-        title="🌙 __**LUNEX BOT**__",
+        title="🌙 LUNEX BOT",
         description=(
-            f"**Advanced, powerful and simple server management.**\n\n"
-            f"📌 **To learn more: {SITE_URL}**"
+            f"Advanced, powerful and simple server management.\n\n"
+            f"To learn more: {SITE_URL}"
         ),
         color=COLOR
     )
@@ -1244,7 +1250,7 @@ async def on_member_join(
             color=COLOR
         )
 
-        embed.set_image(
+        embed.set_thumbnail(
             url=member.display_avatar.url
         )
 
@@ -1298,7 +1304,7 @@ async def on_member_remove(
             color=COLOR
         )
 
-        embed.set_image(
+        embed.set_thumbnail(
             url=member.display_avatar.url
         )
 
@@ -3066,8 +3072,5 @@ async def main():
     await bot.start(TOKEN)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, RuntimeError):
-        pass
+    asyncio.run(main())
 
