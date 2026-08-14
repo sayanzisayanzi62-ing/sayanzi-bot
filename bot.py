@@ -1,7 +1,32 @@
 # ============================================================
-# LUNEX BOT — FULL CLEAN EDITION
+# LUNEX BOT — FULL POWER EDITION
 # discord.py 2.x
 # Railway + MongoDB + SQLite
+#
+# WEBSITE ONLY:
+#   - Welcome settings
+#   - Ticket settings
+#   - Command aliases / edit commands
+#
+# MEMBER:
+#   /commands
+#   /help
+#   /server
+#   /me
+#   /profile
+#   /xp
+#   /level
+#   /register
+#   /top
+#   /top_day
+#   /top_week
+#
+# STAFF:
+#   Moderation
+#   Protection
+#   XP Management
+#   Server Management
+#   Information
 # ============================================================
 
 import os
@@ -29,9 +54,15 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 MONGODB_URI = os.getenv("MONGODB_URI")
+
 SITE_URL = os.getenv(
     "FRONTEND_URL",
     "https://lunex.example"
+)
+
+DB_PATH = os.getenv(
+    "SQLITE_PATH",
+    "lunex.db"
 )
 
 if not TOKEN:
@@ -99,12 +130,6 @@ guild_settings = db["guild_settings"]
 # SQLITE
 # ============================================================
 
-DB_PATH = os.getenv(
-    "SQLITE_PATH",
-    "lunex.db"
-)
-
-
 def sqlite_connection():
 
     return sqlite3.connect(
@@ -150,9 +175,23 @@ async def init_database():
     """)
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS premium_users (
-            user_id INTEGER PRIMARY KEY,
-            expires_at REAL
+        CREATE TABLE IF NOT EXISTS warnings (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            reason TEXT,
+            created_at REAL NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS xp_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            amount INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            created_at REAL NOT NULL
         )
     """)
 
@@ -163,7 +202,7 @@ async def init_database():
 
 
 # ============================================================
-# MONGODB SETTINGS CACHE
+# MONGODB CACHE
 # ============================================================
 
 settings_cache = {}
@@ -171,9 +210,17 @@ settings_cache = {}
 SETTINGS_CACHE_TTL = 300
 
 
+# ============================================================
+# DEFAULT WEBSITE SETTINGS
+# ============================================================
+
 DEFAULT_SETTINGS = {
 
     "language": "ar",
+
+    # --------------------------------------------------------
+    # WEBSITE ONLY — WELCOME
+    # --------------------------------------------------------
 
     "welcome": {
         "enabled": False,
@@ -181,11 +228,19 @@ DEFAULT_SETTINGS = {
         "message": "Welcome {user}!"
     },
 
+    # --------------------------------------------------------
+    # WEBSITE ONLY — LEAVE
+    # --------------------------------------------------------
+
     "leave": {
         "enabled": False,
         "channelId": None,
         "message": "{user} has left the server."
     },
+
+    # --------------------------------------------------------
+    # WEBSITE ONLY — TICKETS
+    # --------------------------------------------------------
 
     "ticket": {
         "enabled": False,
@@ -200,23 +255,51 @@ DEFAULT_SETTINGS = {
         "deleteAfterClose": False
     },
 
-    "autoReplies": [],
+    # --------------------------------------------------------
+    # WEBSITE ONLY — EDIT COMMANDS / ALIASES
+    # --------------------------------------------------------
 
     "commandAliases": {},
 
-    "badwords": {},
+    # --------------------------------------------------------
+    # WEBSITE AUTO REPLIES
+    # --------------------------------------------------------
+
+    "autoReplies": [],
+
+    # --------------------------------------------------------
+    # BAD WORDS
+    # --------------------------------------------------------
+
+    "badwords": [],
+
+    # --------------------------------------------------------
+    # PROTECTION
+    # --------------------------------------------------------
 
     "protection": {
+
         "badwords": True,
+
         "links": True,
+
         "antispam": True
     }
 }
 
 
 # ============================================================
-# GET SETTINGS
+# SETTINGS
 # ============================================================
+
+def deep_copy_settings():
+
+    import copy
+
+    return copy.deepcopy(
+        DEFAULT_SETTINGS
+    )
+
 
 async def get_settings(guild_id):
 
@@ -234,6 +317,7 @@ async def get_settings(guild_id):
             time.time() - timestamp
             < SETTINGS_CACHE_TTL
         ):
+
             return data
 
     data = await guild_settings.find_one(
@@ -244,10 +328,9 @@ async def get_settings(guild_id):
 
     if not data:
 
-        data = {
-            "guildId": guild_id,
-            **DEFAULT_SETTINGS
-        }
+        data = deep_copy_settings()
+
+        data["guildId"] = guild_id
 
         await guild_settings.update_one(
             {
@@ -267,10 +350,6 @@ async def get_settings(guild_id):
     return data
 
 
-# ============================================================
-# UPDATE SETTINGS
-# ============================================================
-
 async def update_settings(
     guild_id,
     update
@@ -283,10 +362,7 @@ async def update_settings(
             "guildId": guild_id
         },
         {
-            "$set": update,
-            "$setOnInsert": {
-                "guildId": guild_id
-            }
+            "$set": update
         },
         upsert=True
     )
@@ -309,20 +385,11 @@ TEXT = {
 
     "ar": {
 
-        "language_changed":
-            "🇱🇾 تم تغيير لغة البوت إلى العربية.",
-
-        "language_invalid":
-            "❌ اللغة غير صحيحة.",
-
         "no_permission":
             "❌ ليس لديك الصلاحية.",
 
-        "xp":
-            "خبرتك الحالية",
-
-        "level":
-            "مستواك الحالي",
+        "language_changed":
+            "🇱🇾 تم تغيير لغة البوت إلى العربية.",
 
         "registered":
             "تم تسجيلك بنجاح.",
@@ -330,38 +397,20 @@ TEXT = {
         "clear":
             "تم حذف الرسائل بنجاح.",
 
-        "level_role_saved":
-            "🎉 تم حفظ رتبة المستوى بنجاح.",
-
-        "role_not_found":
-            "❌ الرتبة غير موجودة.",
-
-        "leaderboard":
-            "🏆 لوحة المتصدرين",
+        "error":
+            "❌ حدث خطأ.",
 
         "empty":
-            "لا توجد بيانات كافية حتى الآن.",
-
-        "error":
-            "❌ حدث خطأ."
+            "لا توجد بيانات كافية حتى الآن."
     },
 
     "en": {
 
-        "language_changed":
-            "🇬🇧 Bot language changed to English.",
-
-        "language_invalid":
-            "❌ Invalid language.",
-
         "no_permission":
             "❌ You don't have permission.",
 
-        "xp":
-            "Your current XP",
-
-        "level":
-            "Your current level",
+        "language_changed":
+            "🇬🇧 Bot language changed to English.",
 
         "registered":
             "You have been registered successfully.",
@@ -369,20 +418,11 @@ TEXT = {
         "clear":
             "Messages deleted successfully.",
 
-        "level_role_saved":
-            "🎉 Level role saved successfully.",
-
-        "role_not_found":
-            "❌ Role not found.",
-
-        "leaderboard":
-            "🏆 Leaderboard",
+        "error":
+            "❌ An error occurred.",
 
         "empty":
-            "Not enough data yet.",
-
-        "error":
-            "❌ An error occurred."
+            "Not enough data yet."
     }
 }
 
@@ -398,9 +438,7 @@ async def get_language(guild_id):
         FROM guild_languages
         WHERE guild_id = ?
         """,
-        (
-            int(guild_id),
-        )
+        (int(guild_id),)
     )
 
     row = cursor.fetchone()
@@ -408,7 +446,6 @@ async def get_language(guild_id):
     conn.close()
 
     if row and row[0] in TEXT:
-
         return row[0]
 
     return "ar"
@@ -429,11 +466,8 @@ async def set_language(
         """
         INSERT INTO guild_languages
         (guild_id, language)
-
         VALUES (?, ?)
-
         ON CONFLICT(guild_id)
-
         DO UPDATE SET
             language = excluded.language
         """,
@@ -449,26 +483,8 @@ async def set_language(
     return True
 
 
-async def tr(
-    guild_id,
-    key
-):
-
-    language = await get_language(
-        guild_id
-    )
-
-    return TEXT.get(
-        language,
-        TEXT["ar"]
-    ).get(
-        key,
-        key
-    )
-
-
 # ============================================================
-# XP SYSTEM
+# XP
 # ============================================================
 
 def xp_for_level(level):
@@ -497,10 +513,6 @@ def calculate_level(total_xp):
 
     return level
 
-
-# ============================================================
-# GET XP DATA
-# ============================================================
 
 async def get_user_xp(
     guild_id,
@@ -547,22 +559,13 @@ async def get_user_xp(
     return {
 
         "xp": row[0],
-
         "level": row[1],
-
         "total_messages": row[2],
-
         "daily_xp": row[3],
-
         "weekly_xp": row[4],
-
         "monthly_xp": row[5]
     }
 
-
-# ============================================================
-# ADD XP
-# ============================================================
 
 async def add_xp(
     guild_id,
@@ -577,10 +580,7 @@ async def add_xp(
 
     cursor.execute(
         """
-        SELECT
-            xp,
-            level,
-            last_message
+        SELECT xp, level, last_message
         FROM xp
         WHERE guild_id = ?
         AND user_id = ?
@@ -605,7 +605,6 @@ async def add_xp(
         old_level = 0
         last_message = 0
 
-    # Anti XP spam
     if now - last_message < 5:
 
         conn.close()
@@ -684,6 +683,160 @@ async def add_xp(
 
 
 # ============================================================
+# XP ADMIN
+# ============================================================
+
+async def modify_xp(
+    guild_id,
+    user_id,
+    amount,
+    moderator_id
+):
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT xp
+        FROM xp
+        WHERE guild_id = ?
+        AND user_id = ?
+        """,
+        (
+            int(guild_id),
+            int(user_id)
+        )
+    )
+
+    row = cursor.fetchone()
+
+    current = row[0] if row else 0
+
+    new_xp = max(
+        0,
+        current + amount
+    )
+
+    new_level = calculate_level(
+        new_xp
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO xp (
+            guild_id,
+            user_id,
+            xp,
+            level,
+            total_messages,
+            daily_xp,
+            weekly_xp,
+            monthly_xp,
+            last_message
+        )
+
+        VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0)
+
+        ON CONFLICT(guild_id, user_id)
+
+        DO UPDATE SET
+            xp = excluded.xp,
+            level = excluded.level
+        """,
+        (
+            int(guild_id),
+            int(user_id),
+            new_xp,
+            new_level
+        )
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO xp_history (
+            guild_id,
+            user_id,
+            amount,
+            moderator_id,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            int(guild_id),
+            int(user_id),
+            int(amount),
+            int(moderator_id),
+            time.time()
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    return new_xp, new_level
+
+
+async def set_user_level(
+    guild_id,
+    user_id,
+    level
+):
+
+    level = max(
+        0,
+        int(level)
+    )
+
+    total_xp = 0
+
+    for current in range(level):
+
+        total_xp += xp_for_level(
+            current
+        )
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO xp (
+            guild_id,
+            user_id,
+            xp,
+            level,
+            total_messages,
+            daily_xp,
+            weekly_xp,
+            monthly_xp,
+            last_message
+        )
+
+        VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0)
+
+        ON CONFLICT(guild_id, user_id)
+
+        DO UPDATE SET
+            xp = excluded.xp,
+            level = excluded.level
+        """,
+        (
+            int(guild_id),
+            int(user_id),
+            total_xp,
+            level
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    return total_xp
+
+
+# ============================================================
 # LEVEL ROLES
 # ============================================================
 
@@ -704,7 +857,6 @@ async def set_level_role(
             level,
             role_id
         )
-
         VALUES (?, ?, ?)
 
         ON CONFLICT(guild_id, level)
@@ -748,10 +900,7 @@ async def get_level_role(
 
     conn.close()
 
-    if not row:
-        return None
-
-    return int(row[0])
+    return int(row[0]) if row else None
 
 
 async def give_level_role(
@@ -790,96 +939,230 @@ async def give_level_role(
 
         await member.add_roles(
             role,
-            reason=(
-                f"Lunex Level {level} reward"
-            )
+            reason=f"Lunex Level {level} reward"
         )
 
-        print(
-            f"✅ Given role {role.name} "
-            f"to {member} for level {level}"
-        )
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
 
-    except discord.Forbidden:
-
-        print(
-            "❌ Discord refused level role."
-        )
-
-    except discord.HTTPException as e:
-
-        print(
-            "❌ Level role HTTP error:",
-            repr(e)
-        )
+        pass
 
 
 # ============================================================
-# HELP MENU
+# WARNINGS
 # ============================================================
 
-def build_help_embed(
-    category
+async def add_warning(
+    guild_id,
+    user_id,
+    moderator_id,
+    reason
 ):
 
-    if category == "general":
+    conn = sqlite_connection()
+    cursor = conn.cursor()
 
-        title = "🏠 Lunex — General"
+    cursor.execute(
+        """
+        INSERT INTO warnings (
+            guild_id,
+            user_id,
+            moderator_id,
+            reason,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            int(guild_id),
+            int(user_id),
+            int(moderator_id),
+            reason,
+            time.time()
+        )
+    )
 
-        description = (
-            "`/commands` — قائمة الأوامر\n"
-            "`/language` — تغيير اللغة\n"
-            "`/register` — تسجيل الحساب"
+    conn.commit()
+    conn.close()
+
+
+async def get_warnings(
+    guild_id,
+    user_id
+):
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            moderator_id,
+            reason,
+            created_at
+        FROM warnings
+        WHERE guild_id = ?
+        AND user_id = ?
+        ORDER BY created_at DESC
+        """,
+        (
+            int(guild_id),
+            int(user_id)
+        )
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+async def remove_warning(
+    guild_id,
+    user_id
+):
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM warnings
+        WHERE rowid = (
+            SELECT rowid
+            FROM warnings
+            WHERE guild_id = ?
+            AND user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        )
+        """,
+        (
+            int(guild_id),
+            int(user_id)
+        )
+    )
+
+    deleted = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return deleted
+
+
+# ============================================================
+# STAFF CHECK
+# ============================================================
+
+def staff_only():
+
+    async def predicate(
+        interaction: discord.Interaction
+    ):
+
+        if not interaction.guild:
+
+            return False
+
+        return (
+            interaction.user.guild_permissions.manage_guild
+            or interaction.user.guild_permissions.administrator
         )
 
-    elif category == "xp":
+    return app_commands.check(
+        predicate
+    )
 
-        title = "⭐ Lunex — XP & Levels"
 
-        description = (
-            "`/xp` — عرض XP\n"
-            "`/level` — عرض المستوى\n"
-            "`/top` — متصدرين الشهر\n"
-            "`/top_day` — متصدرين اليوم\n"
-            "`/top_week` — متصدرين الأسبوع\n"
-            "`/level_roll` — ربط مستوى برتبة"
-        )
+# ============================================================
+# HELP SYSTEM
+# ONLY TWO CATEGORIES
+# ============================================================
 
-    elif category == "profile":
+MEMBER_COMMANDS = """
 
-        title = "👤 Lunex — Profile"
+**General**
+`/commands`
+`/help`
+`/server`
+`/me`
+`/profile`
+`/register`
 
-        description = (
-            "`/me` — معلوماتك\n"
-            "`/profile` — ملفك الشخصي\n"
-            "`/server` — معلومات السيرفر"
-        )
+**XP**
+`/xp`
+`/level`
+`/top`
+`/top_day`
+`/top_week`
+"""
 
-    elif category == "moderation":
 
-        title = "🛡️ Lunex — Moderation"
+STAFF_COMMANDS = """
 
-        description = (
-            "`/clear` — حذف الرسائل"
-        )
+**Moderation**
+`/clear`
+`/kick`
+`/ban`
+`/unban`
+`/timeout`
+`/untimeout`
+`/warn`
+`/warnings`
+`/unwarn`
+`/lock`
+`/unlock`
+`/slowmode`
 
-    else:
+**Protection**
+`/protection`
+`/protection_remove`
+`/antispam`
+`/antilink`
+`/badwords`
+`/badwords_add`
+`/badwords_remove`
 
-        title = "⚙️ Lunex — Administration"
+**XP Management**
+`/xp_add`
+`/xp_remove`
+`/xp_reset`
+`/level_set`
+`/level_reset`
+`/level_roll`
 
-        description = (
-            "`/language` — إعداد اللغة\n"
-            "`/level_roll` — إعداد رتب المستويات"
-        )
+**Server Management**
+`/language`
+`/announce`
+`/nickname`
+`/role_add`
+`/role_remove`
+"""
+
+
+def member_embed():
 
     return discord.Embed(
-        title=title,
-        description=description,
+        title="👥 Member commands",
+        description=MEMBER_COMMANDS,
         color=discord.Color.blurple()
     )
 
 
-class HelpCategorySelect(
+def staff_embed():
+
+    return discord.Embed(
+        title="👑 Staff commands",
+        description=STAFF_COMMANDS,
+        color=discord.Color.gold()
+    )
+
+
+class HelpSelect(
     discord.ui.Select
 ):
 
@@ -888,33 +1171,15 @@ class HelpCategorySelect(
         options = [
 
             discord.SelectOption(
-                label="General",
-                value="general",
-                emoji="🏠"
+                label="Member commands",
+                value="member",
+                emoji="👥"
             ),
 
             discord.SelectOption(
-                label="XP & Levels",
-                value="xp",
-                emoji="⭐"
-            ),
-
-            discord.SelectOption(
-                label="Profile",
-                value="profile",
-                emoji="👤"
-            ),
-
-            discord.SelectOption(
-                label="Moderation",
-                value="moderation",
-                emoji="🛡️"
-            ),
-
-            discord.SelectOption(
-                label="Administration",
-                value="admin",
-                emoji="⚙️"
+                label="Staff commands",
+                value="staff",
+                emoji="👑"
             )
         ]
 
@@ -927,12 +1192,16 @@ class HelpCategorySelect(
 
     async def callback(
         self,
-        interaction
+        interaction: discord.Interaction
     ):
 
-        embed = build_help_embed(
-            self.values[0]
-        )
+        if self.values[0] == "member":
+
+            embed = member_embed()
+
+        else:
+
+            embed = staff_embed()
 
         await interaction.response.edit_message(
             embed=embed,
@@ -947,11 +1216,11 @@ class HelpView(
     def __init__(self):
 
         super().__init__(
-            timeout=120
+            timeout=180
         )
 
         self.add_item(
-            HelpCategorySelect()
+            HelpSelect()
         )
 
 
@@ -961,7 +1230,7 @@ class HelpView(
 
 @bot.tree.command(
     name="commands",
-    description="عرض قائمة أوامر Lunex"
+    description="عرض أوامر Lunex"
 )
 async def commands_command(
     interaction: discord.Interaction
@@ -971,20 +1240,20 @@ async def commands_command(
         title="🌙 LUNEX COMMANDS",
         description=(
             "مرحبًا بك في مركز أوامر **Lunex**.\n\n"
-            "اختر القسم من القائمة بالأسفل."
+            "اختر إحدى الفئتين:"
         ),
         color=discord.Color.blurple()
     )
 
     embed.add_field(
-        name="📚 الأقسام",
-        value=(
-            "🏠 General\n"
-            "⭐ XP & Levels\n"
-            "👤 Profile\n"
-            "🛡️ Moderation\n"
-            "⚙️ Administration"
-        ),
+        name="👥 Member commands",
+        value="أوامر الأعضاء والمعلومات العامة.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="👑 Staff commands",
+        value="أوامر الإدارة والإشراف والحماية.",
         inline=False
     )
 
@@ -1011,29 +1280,24 @@ async def help_command(
 ):
 
     embed = discord.Embed(
-        title="🌙 LUNEX HELP CENTER",
+        title="🌙 LUNEX HELP",
         description=(
-            "**أهلًا بك في Lunex!**\n\n"
-            "اختر القسم المناسب من القائمة "
-            "لعرض أوامره."
+            "مرحبًا بك في مركز أوامر **Lunex**.\n\n"
+            "اختر إحدى الفئتين:"
         ),
         color=discord.Color.blurple()
     )
 
     embed.add_field(
-        name="📂 Categories",
-        value=(
-            "🏠 General\n"
-            "⭐ XP & Levels\n"
-            "👤 Profile\n"
-            "🛡️ Moderation\n"
-            "⚙️ Administration"
-        ),
+        name="👥 Member commands",
+        value="أوامر الأعضاء والمعلومات العامة.",
         inline=False
     )
 
-    embed.set_footer(
-        text="Lunex • !help"
+    embed.add_field(
+        name="👑 Staff commands",
+        value="أوامر الإدارة والإشراف والحماية.",
+        inline=False
     )
 
     await ctx.send(
@@ -1043,113 +1307,68 @@ async def help_command(
 
 
 # ============================================================
-# /LANGUAGE
+# MEMBER — /SERVER
 # ============================================================
 
 @bot.tree.command(
-    name="language",
-    description="تغيير لغة البوت"
+    name="server",
+    description="عرض معلومات السيرفر"
 )
-@app_commands.describe(
-    language="اختر اللغة"
-)
-@app_commands.choices(
-    language=[
-        app_commands.Choice(
-            name="العربية 🇱🇾",
-            value="ar"
-        ),
-        app_commands.Choice(
-            name="English 🇬🇧",
-            value="en"
-        )
-    ]
-)
-@app_commands.default_permissions(
-    manage_guild=True
-)
-async def language_command(
-    interaction: discord.Interaction,
-    language: app_commands.Choice[str]
-):
-
-    if not interaction.user.guild_permissions.manage_guild:
-
-        await interaction.response.send_message(
-            "❌ تحتاج صلاحية Manage Server.",
-            ephemeral=True
-        )
-
-        return
-
-    await set_language(
-        interaction.guild.id,
-        language.value
-    )
-
-    await interaction.response.send_message(
-        TEXT[language.value][
-            "language_changed"
-        ]
-    )
-
-
-# ============================================================
-# /XP
-# ============================================================
-
-@bot.tree.command(
-    name="xp",
-    description="عرض نقاط الخبرة"
-)
-async def xp_command(
+async def server_command(
     interaction: discord.Interaction
 ):
 
-    data = await get_user_xp(
-        interaction.guild.id,
-        interaction.user.id
+    guild = interaction.guild
+
+    embed = discord.Embed(
+        title=f"🏠 {guild.name}",
+        color=discord.Color.blurple()
     )
 
-    language = await get_language(
-        interaction.guild.id
+    if guild.icon:
+
+        embed.set_thumbnail(
+            url=guild.icon.url
+        )
+
+    embed.add_field(
+        name="👥 Members",
+        value=str(guild.member_count),
+        inline=True
+    )
+
+    embed.add_field(
+        name="💬 Channels",
+        value=str(len(guild.channels)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🎭 Roles",
+        value=str(len(guild.roles)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="🆔 Server ID",
+        value=str(guild.id),
+        inline=False
+    )
+
+    embed.add_field(
+        name="👑 Owner",
+        value=guild.owner.mention
+        if guild.owner else "Unknown",
+        inline=False
     )
 
     await interaction.response.send_message(
-
-        f"⭐ **{TEXT[language]['xp']}**\n\n"
-        f"XP: **{data['xp']}**\n"
-        f"Level: **{data['level']}**\n"
-        f"Messages: **{data['total_messages']}**"
+        embed=embed
     )
 
 
 # ============================================================
-# /LEVEL
-# ============================================================
-
-@bot.tree.command(
-    name="level",
-    description="عرض مستواك"
-)
-async def level_command(
-    interaction: discord.Interaction
-):
-
-    data = await get_user_xp(
-        interaction.guild.id,
-        interaction.user.id
-    )
-
-    await interaction.response.send_message(
-
-        f"⭐ **Level {data['level']}**\n"
-        f"✨ XP: **{data['xp']}**"
-    )
-
-
-# ============================================================
-# /ME
+# MEMBER — /ME
 # ============================================================
 
 @bot.tree.command(
@@ -1195,7 +1414,7 @@ async def me_command(
 
 
 # ============================================================
-# /PROFILE
+# MEMBER — /PROFILE
 # ============================================================
 
 @bot.tree.command(
@@ -1213,6 +1432,12 @@ async def profile_command(
 
     embed = discord.Embed(
         title="👤 PROFILE",
+        description=(
+            f"**User:** {interaction.user.mention}\n\n"
+            f"⭐ Level: **{data['level']}**\n"
+            f"✨ XP: **{data['xp']}**\n"
+            f"💬 Messages: **{data['total_messages']}**"
+        ),
         color=discord.Color.blurple()
     )
 
@@ -1220,70 +1445,60 @@ async def profile_command(
         url=interaction.user.display_avatar.url
     )
 
-    embed.description = (
-        f"**User:** {interaction.user.mention}\n\n"
-        f"⭐ Level: **{data['level']}**\n"
-        f"✨ XP: **{data['xp']}**\n"
-        f"💬 Messages: **{data['total_messages']}**"
-    )
-
     await interaction.response.send_message(
         embed=embed
     )
 
 
 # ============================================================
-# /SERVER
+# MEMBER — /XP
 # ============================================================
 
 @bot.tree.command(
-    name="server",
-    description="عرض معلومات السيرفر"
+    name="xp",
+    description="عرض نقاط الخبرة"
 )
-async def server_command(
+async def xp_command(
     interaction: discord.Interaction
 ):
 
-    guild = interaction.guild
-
-    embed = discord.Embed(
-        title=f"🏠 {guild.name}",
-        color=discord.Color.blurple()
-    )
-
-    if guild.icon:
-
-        embed.set_thumbnail(
-            url=guild.icon.url
-        )
-
-    embed.add_field(
-        name="👥 Members",
-        value=str(guild.member_count)
-    )
-
-    embed.add_field(
-        name="💬 Channels",
-        value=str(len(guild.channels))
-    )
-
-    embed.add_field(
-        name="🎭 Roles",
-        value=str(len(guild.roles))
-    )
-
-    embed.add_field(
-        name="🆔 ID",
-        value=str(guild.id)
+    data = await get_user_xp(
+        interaction.guild.id,
+        interaction.user.id
     )
 
     await interaction.response.send_message(
-        embed=embed
+        f"✨ XP: **{data['xp']}**\n"
+        f"⭐ Level: **{data['level']}**\n"
+        f"💬 Messages: **{data['total_messages']}**"
     )
 
 
 # ============================================================
-# /REGISTER
+# MEMBER — /LEVEL
+# ============================================================
+
+@bot.tree.command(
+    name="level",
+    description="عرض مستواك"
+)
+async def level_command(
+    interaction: discord.Interaction
+):
+
+    data = await get_user_xp(
+        interaction.guild.id,
+        interaction.user.id
+    )
+
+    await interaction.response.send_message(
+        f"⭐ Level: **{data['level']}**\n"
+        f"✨ XP: **{data['xp']}**"
+    )
+
+
+# ============================================================
+# MEMBER — /REGISTER
 # ============================================================
 
 @bot.tree.command(
@@ -1299,27 +1514,243 @@ async def register_command(
         interaction.user.id
     )
 
-    language = await get_language(
-        interaction.guild.id
-    )
-
     await interaction.response.send_message(
-        "✅ " +
-        TEXT[language]["registered"],
+        "✅ تم تسجيلك بنجاح.",
         ephemeral=True
     )
 
 
 # ============================================================
-# /CLEAR
+# LEADERBOARD
+# ============================================================
+
+async def get_leaderboard(
+    guild_id,
+    period
+):
+
+    allowed_columns = {
+
+        "day": "daily_xp",
+
+        "week": "weekly_xp",
+
+        "month": "monthly_xp",
+
+        "all": "xp"
+    }
+
+    column = allowed_columns.get(
+        period,
+        "xp"
+    )
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        f"""
+        SELECT user_id, {column}
+        FROM xp
+        WHERE guild_id = ?
+        ORDER BY {column} DESC
+        LIMIT 10
+        """,
+        (int(guild_id),)
+    )
+
+    rows = cursor.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+async def send_leaderboard(
+    interaction,
+    period
+):
+
+    rows = await get_leaderboard(
+        interaction.guild.id,
+        period
+    )
+
+    if not rows:
+
+        await interaction.response.send_message(
+            "🏆 لا توجد بيانات حتى الآن."
+        )
+
+        return
+
+    titles = {
+
+        "day": "🏆 TOP DAY",
+
+        "week": "🏆 TOP WEEK",
+
+        "month": "🏆 TOP MONTH",
+
+        "all": "🏆 TOP"
+    }
+
+    medals = [
+        "🥇",
+        "🥈",
+        "🥉"
+    ]
+
+    description = ""
+
+    for index, (
+        user_id,
+        value
+    ) in enumerate(rows):
+
+        member = interaction.guild.get_member(
+            int(user_id)
+        )
+
+        name = (
+            member.display_name
+            if member
+            else f"User {user_id}"
+        )
+
+        position = (
+            medals[index]
+            if index < 3
+            else f"`#{index + 1}`"
+        )
+
+        description += (
+            f"{position} "
+            f"**{name}** — "
+            f"`{value} XP`\n"
+        )
+
+    embed = discord.Embed(
+        title=titles[period],
+        description=description,
+        color=discord.Color.gold()
+    )
+
+    embed.set_footer(
+        text="Lunex Leaderboards"
+    )
+
+    await interaction.response.send_message(
+        embed=embed
+    )
+
+
+# ============================================================
+# MEMBER — LEADERBOARDS
+# ============================================================
+
+@bot.tree.command(
+    name="top",
+    description="متصدرين الشهر"
+)
+async def top_command(
+    interaction: discord.Interaction
+):
+
+    await send_leaderboard(
+        interaction,
+        "month"
+    )
+
+
+@bot.tree.command(
+    name="top_day",
+    description="متصدرين اليوم"
+)
+async def top_day_command(
+    interaction: discord.Interaction
+):
+
+    await send_leaderboard(
+        interaction,
+        "day"
+    )
+
+
+@bot.tree.command(
+    name="top_week",
+    description="متصدرين الأسبوع"
+)
+async def top_week_command(
+    interaction: discord.Interaction
+):
+
+    await send_leaderboard(
+        interaction,
+        "week"
+    )
+
+
+# ============================================================
+# STAFF — /LANGUAGE
+# ============================================================
+
+@bot.tree.command(
+    name="language",
+    description="تغيير لغة البوت"
+)
+@app_commands.describe(
+    language="اللغة"
+)
+@app_commands.choices(
+    language=[
+        app_commands.Choice(
+            name="العربية 🇱🇾",
+            value="ar"
+        ),
+        app_commands.Choice(
+            name="English 🇬🇧",
+            value="en"
+        )
+    ]
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def language_command(
+    interaction: discord.Interaction,
+    language: app_commands.Choice[str]
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    await set_language(
+        interaction.guild.id,
+        language.value
+    )
+
+    await interaction.response.send_message(
+        TEXT[language.value]["language_changed"]
+    )
+
+
+# ============================================================
+# STAFF — /CLEAR
 # ============================================================
 
 @bot.tree.command(
     name="clear",
-    description="حذف عدد من الرسائل"
+    description="حذف الرسائل"
 )
 @app_commands.describe(
-    amount="عدد الرسائل من 1 إلى 100"
+    amount="من 1 إلى 100"
 )
 @app_commands.default_permissions(
     manage_messages=True
@@ -1332,7 +1763,7 @@ async def clear_command(
     if not interaction.user.guild_permissions.manage_messages:
 
         await interaction.response.send_message(
-            "❌ تحتاج صلاحية Manage Messages.",
+            "❌ تحتاج Manage Messages.",
             ephemeral=True
         )
 
@@ -1363,13 +1794,1265 @@ async def clear_command(
     except discord.HTTPException:
 
         await interaction.followup.send(
-            "❌ حدث خطأ أثناء حذف الرسائل.",
+            "❌ حدث خطأ أثناء الحذف.",
             ephemeral=True
         )
 
 
 # ============================================================
-# /LEVEL_ROLL
+# STAFF — /KICK
+# ============================================================
+
+@bot.tree.command(
+    name="kick",
+    description="طرد عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    reason="السبب"
+)
+@app_commands.default_permissions(
+    kick_members=True
+)
+async def kick_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "No reason provided"
+):
+
+    if not interaction.user.guild_permissions.kick_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Kick Members.",
+            ephemeral=True
+        )
+
+        return
+
+    if member == interaction.user:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك طرد نفسك.",
+            ephemeral=True
+        )
+
+        return
+
+    if member.top_role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك طرد عضو أعلى منك أو بنفس رتبتك.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.kick(
+            reason=reason
+        )
+
+        await interaction.response.send_message(
+            f"👢 تم طرد {member.mention}.\n"
+            f"**السبب:** {reason}"
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ البوت لا يستطيع طرد هذا العضو.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /BAN
+# ============================================================
+
+@bot.tree.command(
+    name="ban",
+    description="حظر عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    reason="السبب"
+)
+@app_commands.default_permissions(
+    ban_members=True
+)
+async def ban_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "No reason provided"
+):
+
+    if not interaction.user.guild_permissions.ban_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Ban Members.",
+            ephemeral=True
+        )
+
+        return
+
+    if member == interaction.user:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك حظر نفسك.",
+            ephemeral=True
+        )
+
+        return
+
+    if member.top_role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك حظر عضو أعلى منك أو بنفس رتبتك.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.ban(
+            reason=reason
+        )
+
+        await interaction.response.send_message(
+            f"🔨 تم حظر {member.mention}.\n"
+            f"**السبب:** {reason}"
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ البوت لا يستطيع حظر هذا العضو.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /UNBAN
+# ============================================================
+
+@bot.tree.command(
+    name="unban",
+    description="فك حظر مستخدم"
+)
+@app_commands.describe(
+    user_id="ID المستخدم"
+)
+@app_commands.default_permissions(
+    ban_members=True
+)
+async def unban_command(
+    interaction: discord.Interaction,
+    user_id: str
+):
+
+    if not interaction.user.guild_permissions.ban_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Ban Members.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        user = await bot.fetch_user(
+            int(user_id)
+        )
+
+        await interaction.guild.unban(
+            user
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم فك حظر {user.mention}."
+        )
+
+    except ValueError:
+
+        await interaction.response.send_message(
+            "❌ ID غير صحيح.",
+            ephemeral=True
+        )
+
+    except discord.NotFound:
+
+        await interaction.response.send_message(
+            "❌ المستخدم غير محظور.",
+            ephemeral=True
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أملك صلاحية فك الحظر.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /TIMEOUT
+# ============================================================
+
+@bot.tree.command(
+    name="timeout",
+    description="إعطاء Timeout"
+)
+@app_commands.describe(
+    member="العضو",
+    minutes="المدة بالدقائق",
+    reason="السبب"
+)
+@app_commands.default_permissions(
+    moderate_members=True
+)
+async def timeout_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    minutes: app_commands.Range[int, 1, 40320],
+    reason: str = "No reason provided"
+):
+
+    if not interaction.user.guild_permissions.moderate_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Moderate Members.",
+            ephemeral=True
+        )
+
+        return
+
+    if member.top_role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك Timeout لهذا العضو.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.timeout(
+            timedelta(minutes=minutes),
+            reason=reason
+        )
+
+        await interaction.response.send_message(
+            f"🔇 تم إعطاء Timeout لـ {member.mention} "
+            f"لمدة **{minutes} دقيقة**."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع إعطاء Timeout لهذا العضو.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /UNTIMEOUT
+# ============================================================
+
+@bot.tree.command(
+    name="untimeout",
+    description="إزالة Timeout"
+)
+@app_commands.describe(
+    member="العضو"
+)
+@app_commands.default_permissions(
+    moderate_members=True
+)
+async def untimeout_command(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+
+    if not interaction.user.guild_permissions.moderate_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Moderate Members.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.timeout(
+            None,
+            reason=f"Timeout removed by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            f"🔊 تم إزالة Timeout عن {member.mention}."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع تعديل Timeout.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /WARN
+# ============================================================
+
+@bot.tree.command(
+    name="warn",
+    description="تحذير عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    reason="السبب"
+)
+@app_commands.default_permissions(
+    moderate_members=True
+)
+async def warn_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str = "No reason provided"
+):
+
+    if not interaction.user.guild_permissions.moderate_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Moderate Members.",
+            ephemeral=True
+        )
+
+        return
+
+    await add_warning(
+        interaction.guild.id,
+        member.id,
+        interaction.user.id,
+        reason
+    )
+
+    warnings = await get_warnings(
+        interaction.guild.id,
+        member.id
+    )
+
+    await interaction.response.send_message(
+        f"⚠️ تم تحذير {member.mention}.\n"
+        f"**السبب:** {reason}\n"
+        f"**عدد التحذيرات:** {len(warnings)}"
+    )
+
+
+# ============================================================
+# STAFF — /WARNINGS
+# ============================================================
+
+@bot.tree.command(
+    name="warnings",
+    description="عرض تحذيرات عضو"
+)
+@app_commands.describe(
+    member="العضو"
+)
+@app_commands.default_permissions(
+    moderate_members=True
+)
+async def warnings_command(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+
+    if not interaction.user.guild_permissions.moderate_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Moderate Members.",
+            ephemeral=True
+        )
+
+        return
+
+    rows = await get_warnings(
+        interaction.guild.id,
+        member.id
+    )
+
+    if not rows:
+
+        await interaction.response.send_message(
+            f"✅ {member.mention} ليس لديه تحذيرات."
+        )
+
+        return
+
+    description = ""
+
+    for index, (
+        moderator_id,
+        reason,
+        created_at
+    ) in enumerate(rows[:10], 1):
+
+        description += (
+            f"**#{index}** — {reason}\n"
+            f"Moderator: <@{moderator_id}>\n\n"
+        )
+
+    embed = discord.Embed(
+        title=f"⚠️ Warnings — {member.display_name}",
+        description=description,
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.send_message(
+        embed=embed
+    )
+
+
+# ============================================================
+# STAFF — /UNWARN
+# ============================================================
+
+@bot.tree.command(
+    name="unwarn",
+    description="إزالة آخر تحذير"
+)
+@app_commands.describe(
+    member="العضو"
+)
+@app_commands.default_permissions(
+    moderate_members=True
+)
+async def unwarn_command(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+
+    if not interaction.user.guild_permissions.moderate_members:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Moderate Members.",
+            ephemeral=True
+        )
+
+        return
+
+    deleted = await remove_warning(
+        interaction.guild.id,
+        member.id
+    )
+
+    if deleted:
+
+        await interaction.response.send_message(
+            f"✅ تم إزالة آخر تحذير عن {member.mention}."
+        )
+
+    else:
+
+        await interaction.response.send_message(
+            "❌ لا توجد تحذيرات.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /LOCK
+# ============================================================
+
+@bot.tree.command(
+    name="lock",
+    description="قفل القناة"
+)
+@app_commands.default_permissions(
+    manage_channels=True
+)
+async def lock_command(
+    interaction: discord.Interaction
+):
+
+    if not interaction.user.guild_permissions.manage_channels:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Channels.",
+            ephemeral=True
+        )
+
+        return
+
+    overwrite = interaction.channel.overwrites_for(
+        interaction.guild.default_role
+    )
+
+    overwrite.send_messages = False
+
+    try:
+
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Locked by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            "🔒 تم قفل القناة."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أملك صلاحية تعديل القناة.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /UNLOCK
+# ============================================================
+
+@bot.tree.command(
+    name="unlock",
+    description="فتح القناة"
+)
+@app_commands.default_permissions(
+    manage_channels=True
+)
+async def unlock_command(
+    interaction: discord.Interaction
+):
+
+    if not interaction.user.guild_permissions.manage_channels:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Channels.",
+            ephemeral=True
+        )
+
+        return
+
+    overwrite = interaction.channel.overwrites_for(
+        interaction.guild.default_role
+    )
+
+    overwrite.send_messages = None
+
+    try:
+
+        await interaction.channel.set_permissions(
+            interaction.guild.default_role,
+            overwrite=overwrite,
+            reason=f"Unlocked by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            "🔓 تم فتح القناة."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أملك صلاحية تعديل القناة.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /SLOWMODE
+# ============================================================
+
+@bot.tree.command(
+    name="slowmode",
+    description="تعيين Slowmode"
+)
+@app_commands.describe(
+    seconds="الثواني من 0 إلى 21600"
+)
+@app_commands.default_permissions(
+    manage_channels=True
+)
+async def slowmode_command(
+    interaction: discord.Interaction,
+    seconds: app_commands.Range[int, 0, 21600]
+):
+
+    if not interaction.user.guild_permissions.manage_channels:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Channels.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await interaction.channel.edit(
+            slowmode_delay=seconds
+        )
+
+        await interaction.response.send_message(
+            f"🐌 تم ضبط Slowmode على **{seconds} ثانية**."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع تعديل القناة.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# STAFF — /PROTECTION
+# ============================================================
+
+@bot.tree.command(
+    name="protection",
+    description="عرض وتفعيل حماية السيرفر"
+)
+@app_commands.describe(
+    feature="نوع الحماية",
+    enabled="تفعيل أو تعطيل"
+)
+@app_commands.choices(
+    feature=[
+        app_commands.Choice(
+            name="All Protection",
+            value="all"
+        ),
+        app_commands.Choice(
+            name="Anti Spam",
+            value="antispam"
+        ),
+        app_commands.Choice(
+            name="Anti Link",
+            value="links"
+        ),
+        app_commands.Choice(
+            name="Bad Words",
+            value="badwords"
+        )
+    ]
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def protection_command(
+    interaction: discord.Interaction,
+    feature: app_commands.Choice[str],
+    enabled: bool
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    key = feature.value
+
+    if key == "all":
+
+        update = {
+            "protection.antispam": enabled,
+            "protection.links": enabled,
+            "protection.badwords": enabled
+        }
+
+    else:
+
+        update = {
+            f"protection.{key}": enabled
+        }
+
+    await update_settings(
+        interaction.guild.id,
+        update
+    )
+
+    state = "🟢 ON" if enabled else "🔴 OFF"
+
+    await interaction.response.send_message(
+        f"🛡️ **{feature.name}** → {state}"
+    )
+
+
+# ============================================================
+# STAFF — /PROTECTION_REMOVE
+# ============================================================
+
+@bot.tree.command(
+    name="protection_remove",
+    description="تعطيل حماية معينة"
+)
+@app_commands.describe(
+    feature="نوع الحماية"
+)
+@app_commands.choices(
+    feature=[
+        app_commands.Choice(
+            name="All Protection",
+            value="all"
+        ),
+        app_commands.Choice(
+            name="Anti Spam",
+            value="antispam"
+        ),
+        app_commands.Choice(
+            name="Anti Link",
+            value="links"
+        ),
+        app_commands.Choice(
+            name="Bad Words",
+            value="badwords"
+        )
+    ]
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def protection_remove_command(
+    interaction: discord.Interaction,
+    feature: app_commands.Choice[str]
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    if feature.value == "all":
+
+        update = {
+            "protection.antispam": False,
+            "protection.links": False,
+            "protection.badwords": False
+        }
+
+    else:
+
+        update = {
+            f"protection.{feature.value}": False
+        }
+
+    await update_settings(
+        interaction.guild.id,
+        update
+    )
+
+    await interaction.response.send_message(
+        f"🛡️ تم تعطيل **{feature.name}**."
+    )
+
+
+# ============================================================
+# STAFF — /ANTISPAM
+# ============================================================
+
+@bot.tree.command(
+    name="antispam",
+    description="تفعيل أو تعطيل Anti Spam"
+)
+@app_commands.describe(
+    enabled="الحالة"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def antispam_command(
+    interaction: discord.Interaction,
+    enabled: bool
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    await update_settings(
+        interaction.guild.id,
+        {
+            "protection.antispam": enabled
+        }
+    )
+
+    await interaction.response.send_message(
+        "🛡️ Anti-Spam: "
+        + ("🟢 ON" if enabled else "🔴 OFF")
+    )
+
+
+# ============================================================
+# STAFF — /ANTILINK
+# ============================================================
+
+@bot.tree.command(
+    name="antilink",
+    description="تفعيل أو تعطيل منع الروابط"
+)
+@app_commands.describe(
+    enabled="الحالة"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def antilink_command(
+    interaction: discord.Interaction,
+    enabled: bool
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    await update_settings(
+        interaction.guild.id,
+        {
+            "protection.links": enabled
+        }
+    )
+
+    await interaction.response.send_message(
+        "🔗 Anti-Link: "
+        + ("🟢 ON" if enabled else "🔴 OFF")
+    )
+
+
+# ============================================================
+# STAFF — /BADWORDS
+# ============================================================
+
+@bot.tree.command(
+    name="badwords",
+    description="تفعيل أو تعطيل فلتر الكلمات"
+)
+@app_commands.describe(
+    enabled="الحالة"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def badwords_command(
+    interaction: discord.Interaction,
+    enabled: bool
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    await update_settings(
+        interaction.guild.id,
+        {
+            "protection.badwords": enabled
+        }
+    )
+
+    await interaction.response.send_message(
+        "🤬 Bad Words: "
+        + ("🟢 ON" if enabled else "🔴 OFF")
+    )
+
+
+# ============================================================
+# STAFF — /BADWORDS_ADD
+# ============================================================
+
+@bot.tree.command(
+    name="badwords_add",
+    description="إضافة كلمة للفلتر"
+)
+@app_commands.describe(
+    word="الكلمة"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def badwords_add_command(
+    interaction: discord.Interaction,
+    word: str
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    word = word.strip().lower()
+
+    if not word:
+
+        await interaction.response.send_message(
+            "❌ الكلمة فارغة.",
+            ephemeral=True
+        )
+
+        return
+
+    settings = await get_settings(
+        interaction.guild.id
+    )
+
+    words = settings.get(
+        "badwords",
+        []
+    )
+
+    if not isinstance(words, list):
+
+        words = []
+
+    if word in words:
+
+        await interaction.response.send_message(
+            "⚠️ الكلمة موجودة مسبقًا.",
+            ephemeral=True
+        )
+
+        return
+
+    words.append(word)
+
+    await update_settings(
+        interaction.guild.id,
+        {
+            "badwords": words
+        }
+    )
+
+    await interaction.response.send_message(
+        f"✅ تمت إضافة `{word}` إلى قائمة الكلمات."
+    )
+
+
+# ============================================================
+# STAFF — /BADWORDS_REMOVE
+# ============================================================
+
+@bot.tree.command(
+    name="badwords_remove",
+    description="حذف كلمة من الفلتر"
+)
+@app_commands.describe(
+    word="الكلمة"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def badwords_remove_command(
+    interaction: discord.Interaction,
+    word: str
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    word = word.strip().lower()
+
+    settings = await get_settings(
+        interaction.guild.id
+    )
+
+    words = settings.get(
+        "badwords",
+        []
+    )
+
+    if word not in words:
+
+        await interaction.response.send_message(
+            "❌ الكلمة غير موجودة.",
+            ephemeral=True
+        )
+
+        return
+
+    words.remove(word)
+
+    await update_settings(
+        interaction.guild.id,
+        {
+            "badwords": words
+        }
+    )
+
+    await interaction.response.send_message(
+        f"✅ تم حذف `{word}`."
+    )
+
+
+# ============================================================
+# STAFF — /XP_ADD
+# ============================================================
+
+@bot.tree.command(
+    name="xp_add",
+    description="إضافة XP لعضو"
+)
+@app_commands.describe(
+    member="العضو",
+    amount="الكمية"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def xp_add_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    amount: app_commands.Range[int, 1, 1000000]
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    new_xp, level = await modify_xp(
+        interaction.guild.id,
+        member.id,
+        amount,
+        interaction.user.id
+    )
+
+    await interaction.response.send_message(
+        f"✨ تمت إضافة **{amount} XP** إلى "
+        f"{member.mention}.\n"
+        f"XP: **{new_xp}**\n"
+        f"Level: **{level}**"
+    )
+
+
+# ============================================================
+# STAFF — /XP_REMOVE
+# ============================================================
+
+@bot.tree.command(
+    name="xp_remove",
+    description="إزالة XP من عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    amount="الكمية"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def xp_remove_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    amount: app_commands.Range[int, 1, 1000000]
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    new_xp, level = await modify_xp(
+        interaction.guild.id,
+        member.id,
+        -amount,
+        interaction.user.id
+    )
+
+    await interaction.response.send_message(
+        f"➖ تمت إزالة **{amount} XP** من "
+        f"{member.mention}.\n"
+        f"XP: **{new_xp}**\n"
+        f"Level: **{level}**"
+    )
+
+
+# ============================================================
+# STAFF — /XP_RESET
+# ============================================================
+
+@bot.tree.command(
+    name="xp_reset",
+    description="تصفير XP عضو"
+)
+@app_commands.describe(
+    member="العضو"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def xp_reset_command(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    conn = sqlite_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM xp
+        WHERE guild_id = ?
+        AND user_id = ?
+        """,
+        (
+            interaction.guild.id,
+            member.id
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    await interaction.response.send_message(
+        f"🧹 تم تصفير XP لـ {member.mention}."
+    )
+
+
+# ============================================================
+# STAFF — /LEVEL_SET
+# ============================================================
+
+@bot.tree.command(
+    name="level_set",
+    description="تعيين مستوى عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    level="المستوى"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def level_set_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    level: app_commands.Range[int, 0, 1000]
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    xp = await set_user_level(
+        interaction.guild.id,
+        member.id,
+        level
+    )
+
+    await give_level_role(
+        interaction.guild,
+        member,
+        level
+    )
+
+    await interaction.response.send_message(
+        f"⭐ تم تعيين مستوى {member.mention} إلى "
+        f"**{level}**.\n"
+        f"XP: **{xp}**"
+    )
+
+
+# ============================================================
+# STAFF — /LEVEL_RESET
+# ============================================================
+
+@bot.tree.command(
+    name="level_reset",
+    description="تصفير مستوى عضو"
+)
+@app_commands.describe(
+    member="العضو"
+)
+@app_commands.default_permissions(
+    manage_guild=True
+)
+async def level_reset_command(
+    interaction: discord.Interaction,
+    member: discord.Member
+):
+
+    if not interaction.user.guild_permissions.manage_guild:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Server.",
+            ephemeral=True
+        )
+
+        return
+
+    await set_user_level(
+        interaction.guild.id,
+        member.id,
+        0
+    )
+
+    await interaction.response.send_message(
+        f"🔄 تم تصفير مستوى {member.mention}."
+    )
+
+
+# ============================================================
+# STAFF — /LEVEL_ROLL
 # ============================================================
 
 @bot.tree.command(
@@ -1392,7 +3075,7 @@ async def level_roll_command(
     if not interaction.user.guild_permissions.manage_guild:
 
         await interaction.response.send_message(
-            "❌ تحتاج صلاحية Manage Server.",
+            "❌ تحتاج Manage Server.",
             ephemeral=True
         )
 
@@ -1401,7 +3084,7 @@ async def level_roll_command(
     if role.is_default():
 
         await interaction.response.send_message(
-            "❌ لا يمكن اختيار رتبة @everyone.",
+            "❌ لا يمكن استخدام @everyone.",
             ephemeral=True
         )
 
@@ -1409,16 +3092,14 @@ async def level_roll_command(
 
     bot_member = interaction.guild.me
 
-    if bot_member:
+    if bot_member and role >= bot_member.top_role:
 
-        if role >= bot_member.top_role:
+        await interaction.response.send_message(
+            "❌ رتبة البوت يجب أن تكون أعلى من الرتبة.",
+            ephemeral=True
+        )
 
-            await interaction.response.send_message(
-                "❌ رتبة البوت يجب أن تكون أعلى من الرتبة المحددة.",
-                ephemeral=True
-            )
-
-            return
+        return
 
     await set_level_role(
         interaction.guild.id,
@@ -1427,211 +3108,431 @@ async def level_roll_command(
     )
 
     await interaction.response.send_message(
-
-        f"🎉 تم إعداد مكافأة المستوى!\n\n"
-        f"⭐ Level: **{level}**\n"
-        f"🎭 Role: {role.mention}"
+        f"🎉 تم ربط Level **{level}** "
+        f"بالرتبة {role.mention}."
     )
 
 
 # ============================================================
-# LEADERBOARD
+# STAFF — /ANNOUNCE
 # ============================================================
 
-async def get_leaderboard(
-    guild_id,
-    period
+@bot.tree.command(
+    name="announce",
+    description="إرسال إعلان"
+)
+@app_commands.describe(
+    title="العنوان",
+    message="نص الإعلان"
+)
+@app_commands.default_permissions(
+    manage_messages=True
+)
+async def announce_command(
+    interaction: discord.Interaction,
+    title: str,
+    message: str
 ):
 
-    allowed_columns = {
-
-        "day":
-            "daily_xp",
-
-        "week":
-            "weekly_xp",
-
-        "month":
-            "monthly_xp",
-
-        "all":
-            "xp"
-    }
-
-    column = allowed_columns.get(
-        period,
-        "xp"
-    )
-
-    conn = sqlite_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        f"""
-        SELECT user_id, {column}
-        FROM xp
-        WHERE guild_id = ?
-        ORDER BY {column} DESC
-        LIMIT 10
-        """,
-        (
-            int(guild_id),
-        )
-    )
-
-    rows = cursor.fetchall()
-
-    conn.close()
-
-    return rows
-
-
-async def send_leaderboard(
-    interaction,
-    period
-):
-
-    rows = await get_leaderboard(
-        interaction.guild.id,
-        period
-    )
-
-    if not rows:
+    if not interaction.user.guild_permissions.manage_messages:
 
         await interaction.response.send_message(
-            "🏆 لا توجد بيانات حتى الآن."
+            "❌ تحتاج Manage Messages.",
+            ephemeral=True
         )
 
         return
 
-    titles = {
-
-        "day":
-            "🏆 TOP DAY",
-
-        "week":
-            "🏆 TOP WEEK",
-
-        "month":
-            "🏆 TOP MONTH",
-
-        "all":
-            "🏆 TOP"
-    }
-
-    description = ""
-
-    medals = [
-        "🥇",
-        "🥈",
-        "🥉"
-    ]
-
-    for index, (
-        user_id,
-        value
-    ) in enumerate(rows):
-
-        member = interaction.guild.get_member(
-            int(user_id)
-        )
-
-        if member:
-
-            name = member.display_name
-
-        else:
-
-            name = f"User {user_id}"
-
-        if index < 3:
-
-            position = medals[index]
-
-        else:
-
-            position = f"`#{index + 1}`"
-
-        description += (
-            f"{position} "
-            f"**{name}** — "
-            f"`{value} XP`\n"
-        )
-
     embed = discord.Embed(
-        title=titles.get(
-            period,
-            "🏆 TOP"
-        ),
-        description=description,
-        color=discord.Color.gold()
+        title=f"📢 {title}",
+        description=message,
+        color=discord.Color.blurple()
     )
 
     embed.set_footer(
-        text="Lunex Leaderboards"
+        text=f"By {interaction.user.display_name}"
     )
 
-    await interaction.response.send_message(
+    await interaction.channel.send(
         embed=embed
     )
 
-
-# ============================================================
-# /TOP
-# ============================================================
-
-@bot.tree.command(
-    name="top",
-    description="متصدرين الشهر"
-)
-async def top_command(
-    interaction: discord.Interaction
-):
-
-    await send_leaderboard(
-        interaction,
-        "month"
+    await interaction.response.send_message(
+        "✅ تم إرسال الإعلان.",
+        ephemeral=True
     )
 
 
 # ============================================================
-# /TOP_DAY
+# STAFF — /NICKNAME
 # ============================================================
 
 @bot.tree.command(
-    name="top_day",
-    description="متصدرين اليوم"
+    name="nickname",
+    description="تغيير لقب عضو"
 )
-async def top_day_command(
-    interaction: discord.Interaction
+@app_commands.describe(
+    member="العضو",
+    nickname="اللقب الجديد"
+)
+@app_commands.default_permissions(
+    manage_nicknames=True
+)
+async def nickname_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    nickname: str
 ):
 
-    await send_leaderboard(
-        interaction,
-        "day"
-    )
+    if not interaction.user.guild_permissions.manage_nicknames:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Nicknames.",
+            ephemeral=True
+        )
+
+        return
+
+    if member.top_role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك تغيير لقب هذا العضو.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.edit(
+            nick=nickname,
+            reason=f"Nickname changed by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            f"✅ تم تغيير لقب {member.mention} إلى "
+            f"**{nickname}**."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع تغيير اللقب.",
+            ephemeral=True
+        )
 
 
 # ============================================================
-# /TOP_WEEK
+# STAFF — /ROLE_ADD
 # ============================================================
 
 @bot.tree.command(
-    name="top_week",
-    description="متصدرين الأسبوع"
+    name="role_add",
+    description="إعطاء رتبة لعضو"
 )
-async def top_week_command(
-    interaction: discord.Interaction
+@app_commands.describe(
+    member="العضو",
+    role="الرتبة"
+)
+@app_commands.default_permissions(
+    manage_roles=True
+)
+async def role_add_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role
 ):
 
-    await send_leaderboard(
-        interaction,
-        "week"
-    )
+    if not interaction.user.guild_permissions.manage_roles:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Roles.",
+            ephemeral=True
+        )
+
+        return
+
+    if role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك استخدام رتبة أعلى منك.",
+            ephemeral=True
+        )
+
+        return
+
+    if role >= interaction.guild.me.top_role:
+
+        await interaction.response.send_message(
+            "❌ رتبة البوت يجب أن تكون أعلى.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.add_roles(
+            role,
+            reason=f"Role added by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            f"✅ تمت إضافة {role.mention} إلى {member.mention}."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع إعطاء هذه الرتبة.",
+            ephemeral=True
+        )
 
 
 # ============================================================
-# MESSAGE XP
+# STAFF — /ROLE_REMOVE
+# ============================================================
+
+@bot.tree.command(
+    name="role_remove",
+    description="إزالة رتبة من عضو"
+)
+@app_commands.describe(
+    member="العضو",
+    role="الرتبة"
+)
+@app_commands.default_permissions(
+    manage_roles=True
+)
+async def role_remove_command(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    role: discord.Role
+):
+
+    if not interaction.user.guild_permissions.manage_roles:
+
+        await interaction.response.send_message(
+            "❌ تحتاج Manage Roles.",
+            ephemeral=True
+        )
+
+        return
+
+    if role >= interaction.user.top_role:
+
+        await interaction.response.send_message(
+            "❌ لا يمكنك إزالة رتبة أعلى منك.",
+            ephemeral=True
+        )
+
+        return
+
+    try:
+
+        await member.remove_roles(
+            role,
+            reason=f"Role removed by {interaction.user}"
+        )
+
+        await interaction.response.send_message(
+            f"✅ تمت إزالة {role.mention} من {member.mention}."
+        )
+
+    except discord.Forbidden:
+
+        await interaction.response.send_message(
+            "❌ لا أستطيع إزالة هذه الرتبة.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# PROTECTION ENGINE
+# ============================================================
+
+URL_PATTERN = re.compile(
+    r"(https?://|www\.|discord\.gg/|discord\.com/invite/)",
+    re.IGNORECASE
+)
+
+
+spam_tracker = {}
+
+
+async def process_protection(
+    message
+):
+
+    if not message.guild:
+        return False
+
+    if message.author.bot:
+        return False
+
+    # Staff bypass
+    if (
+        message.author.guild_permissions.manage_messages
+        or message.author.guild_permissions.administrator
+    ):
+
+        return False
+
+    settings = await get_settings(
+        message.guild.id
+    )
+
+    protection = settings.get(
+        "protection",
+        {}
+    )
+
+    # --------------------------------------------------------
+    # ANTI LINK
+    # --------------------------------------------------------
+
+    if protection.get(
+        "links",
+        True
+    ):
+
+        if URL_PATTERN.search(
+            message.content
+        ):
+
+            try:
+                await message.delete()
+
+            except (
+                discord.Forbidden,
+                discord.HTTPException
+            ):
+                pass
+
+            try:
+
+                await message.channel.send(
+                    f"🔗 {message.author.mention} "
+                    f"الروابط غير مسموحة هنا.",
+                    delete_after=5
+                )
+
+            except discord.HTTPException:
+                pass
+
+            return True
+
+    # --------------------------------------------------------
+    # BAD WORDS
+    # --------------------------------------------------------
+
+    if protection.get(
+        "badwords",
+        True
+    ):
+
+        words = settings.get(
+            "badwords",
+            []
+        )
+
+        content = message.content.lower()
+
+        for word in words:
+
+            if word and word.lower() in content:
+
+                try:
+                    await message.delete()
+
+                except (
+                    discord.Forbidden,
+                    discord.HTTPException
+                ):
+                    pass
+
+                try:
+
+                    await message.channel.send(
+                        f"🤬 {message.author.mention} "
+                        f"تم حذف الرسالة بسبب فلتر الكلمات.",
+                        delete_after=5
+                    )
+
+                except discord.HTTPException:
+                    pass
+
+                return True
+
+    # --------------------------------------------------------
+    # ANTI SPAM
+    # --------------------------------------------------------
+
+    if protection.get(
+        "antispam",
+        True
+    ):
+
+        now = time.time()
+
+        key = (
+            message.guild.id,
+            message.author.id
+        )
+
+        entries = spam_tracker.get(
+            key,
+            []
+        )
+
+        entries = [
+            timestamp
+            for timestamp in entries
+            if now - timestamp < 7
+        ]
+
+        entries.append(
+            now
+        )
+
+        spam_tracker[key] = entries
+
+        if len(entries) >= 6:
+
+            try:
+
+                await message.delete()
+
+            except (
+                discord.Forbidden,
+                discord.HTTPException
+            ):
+                pass
+
+            try:
+
+                await message.author.timeout(
+                    timedelta(
+                        seconds=30
+                    ),
+                    reason="Lunex Anti-Spam"
+                )
+
+            except (
+                discord.Forbidden,
+                discord.HTTPException
+            ):
+                pass
+
+            spam_tracker[key] = []
+
+            return True
+
+    return False
+
+
+# ============================================================
+# MESSAGE XP + PROTECTION
 # ============================================================
 
 @bot.event
@@ -1643,6 +3544,27 @@ async def on_message(
         return
 
     if message.guild:
+
+        try:
+
+            blocked = await process_protection(
+                message
+            )
+
+            if blocked:
+
+                return
+
+        except Exception as e:
+
+            print(
+                "❌ Protection error:",
+                repr(e)
+            )
+
+        # ----------------------------------------------------
+        # XP
+        # ----------------------------------------------------
 
         try:
 
@@ -1664,10 +3586,12 @@ async def on_message(
 
                     await message.channel.send(
                         f"🎉 {message.author.mention} "
-                        f"وصل إلى المستوى **{new_level}**!"
+                        f"وصل إلى المستوى **{new_level}**!",
+                        delete_after=8
                     )
 
                 except discord.HTTPException:
+
                     pass
 
         except Exception as e:
@@ -1683,14 +3607,108 @@ async def on_message(
 
 
 # ============================================================
-# BOT READY
+# ERROR HANDLING — SLASH
+# ============================================================
+
+@bot.tree.error
+async def on_app_command_error(
+    interaction,
+    error
+):
+
+    if isinstance(
+        error,
+        app_commands.errors.MissingPermissions
+    ):
+
+        message = (
+            "❌ ليس لديك الصلاحية المطلوبة."
+        )
+
+    elif isinstance(
+        error,
+        app_commands.errors.CommandOnCooldown
+    ):
+
+        message = (
+            "⏳ حاول مرة أخرى لاحقًا."
+        )
+
+    else:
+
+        print(
+            "❌ Slash command error:",
+            repr(error)
+        )
+
+        message = (
+            "❌ حدث خطأ أثناء تنفيذ الأمر."
+        )
+
+    try:
+
+        if interaction.response.is_done():
+
+            await interaction.followup.send(
+                message,
+                ephemeral=True
+            )
+
+        else:
+
+            await interaction.response.send_message(
+                message,
+                ephemeral=True
+            )
+
+    except discord.HTTPException:
+
+        pass
+
+
+# ============================================================
+# PREFIX ERROR
+# ============================================================
+
+@bot.event
+async def on_command_error(
+    ctx,
+    error
+):
+
+    if isinstance(
+        error,
+        commands.CommandNotFound
+    ):
+
+        return
+
+    if isinstance(
+        error,
+        commands.MissingPermissions
+    ):
+
+        await ctx.send(
+            "❌ ليس لديك الصلاحية المطلوبة."
+        )
+
+        return
+
+    print(
+        "❌ Prefix command error:",
+        repr(error)
+    )
+
+
+# ============================================================
+# READY
 # ============================================================
 
 @bot.event
 async def on_ready():
 
     print(
-        "========================================"
+        "=========================================="
     )
 
     print(
@@ -1703,49 +3721,20 @@ async def on_ready():
     )
 
     print(
-        "========================================"
+        "🛡️ Protection: READY"
     )
 
+    print(
+        "⭐ XP System: READY"
+    )
 
-# ============================================================
-# STARTUP
-# ============================================================
+    print(
+        "🌐 Website Settings: READY"
+    )
 
-async def startup():
-
-    await init_database()
-
-    try:
-
-        await mongo.admin.command(
-            "ping"
-        )
-
-        print(
-            "✅ MongoDB connected."
-        )
-
-    except Exception as e:
-
-        print(
-            "⚠️ MongoDB connection failed:",
-            repr(e)
-        )
-
-    try:
-
-        synced = await bot.tree.sync()
-
-        print(
-            f"✅ Synced {len(synced)} slash commands."
-        )
-
-    except Exception as e:
-
-        print(
-            "❌ Slash command sync error:",
-            repr(e)
-        )
+    print(
+        "=========================================="
+    )
 
 
 # ============================================================
@@ -1788,6 +3777,20 @@ async def setup_hook():
             "❌ Slash sync failed:",
             repr(e)
         )
+
+
+# ============================================================
+# SHUTDOWN
+# ============================================================
+
+async def close_connections():
+
+    try:
+
+        mongo.close()
+
+    except Exception:
+        pass
 
 
 # ============================================================
