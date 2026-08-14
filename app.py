@@ -1,5 +1,4 @@
 import os
-import asyncio
 import bot as bot_module
 import threading
 from urllib.parse import urlencode
