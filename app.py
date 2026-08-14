@@ -4,6 +4,7 @@
 # =========================================
 
 import os
+import aiosqlite
 import asyncio
 import threading
 
