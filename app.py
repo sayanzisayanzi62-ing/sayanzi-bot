@@ -4,7 +4,6 @@
 # =========================================
 
 import os
-import aiosqlite
 import asyncio
 import threading
 
@@ -12,12 +11,7 @@ import requests
 import discord
 
 from dotenv import load_dotenv
-from flask import (
-    Flask,
-    request,
-    redirect,
-    jsonify
-)
+from flask import Flask, request, redirect, jsonify
 from flask_cors import CORS
 
 from utils.auth import (
@@ -25,12 +19,11 @@ from utils.auth import (
     auth_required
 )
 
-from bot import (
-    bot,
-    get_settings,
-    update_settings,
-    post_ticket_panel
-)
+# IMPORTANT:
+# Import the module itself first.
+# This prevents the whole API from crashing if
+# an optional function is missing.
+import bot as bot_module
 
 
 # =========================================
@@ -44,6 +37,31 @@ CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+
+
+# =========================================
+# BOT OBJECTS
+# =========================================
+
+bot = bot_module.bot
+
+get_settings = getattr(
+    bot_module,
+    "get_settings",
+    None
+)
+
+update_settings = getattr(
+    bot_module,
+    "update_settings",
+    None
+)
+
+post_ticket_panel = getattr(
+    bot_module,
+    "post_ticket_panel",
+    None
+)
 
 
 # =========================================
@@ -79,22 +97,48 @@ app = Flask(__name__)
 
 CORS(
     app,
-    origins=[
-        FRONTEND_URL
-    ],
+    origins=[FRONTEND_URL],
     supports_credentials=True
 )
 
 
 # =========================================
-# HELPERS
+# ASYNC HELPER
+# =========================================
+
+def run_async(coro, timeout=20):
+    """
+    Run an async coroutine from Flask thread
+    using the Discord bot event loop.
+    """
+
+    if not bot.is_ready():
+        raise RuntimeError(
+            "Discord bot is not ready."
+        )
+
+    loop = bot.loop
+
+    if loop is None:
+        raise RuntimeError(
+            "Discord event loop is not available."
+        )
+
+    future = asyncio.run_coroutine_threadsafe(
+        coro,
+        loop
+    )
+
+    return future.result(
+        timeout=timeout
+    )
+
+
+# =========================================
+# SERIALIZE
 # =========================================
 
 def serialize(value):
-    """
-    Convert MongoDB/Python values
-    into JSON-safe values.
-    """
 
     if isinstance(value, dict):
 
@@ -111,7 +155,6 @@ def serialize(value):
             for v in value
         ]
 
-    # ObjectId-like values
     if hasattr(value, "to_json"):
 
         try:
@@ -119,7 +162,6 @@ def serialize(value):
         except Exception:
             pass
 
-    # Datetime
     if hasattr(value, "isoformat"):
 
         try:
@@ -130,7 +172,11 @@ def serialize(value):
     return value
 
 
-def get_bot_guild(guild_id: str):
+# =========================================
+# GUILD HELPERS
+# =========================================
+
+def get_bot_guild(guild_id):
 
     try:
 
@@ -138,16 +184,12 @@ def get_bot_guild(guild_id: str):
             int(guild_id)
         )
 
-    except (
-        ValueError,
-        TypeError,
-        Exception
-    ):
+    except Exception:
 
         return None
 
 
-def bot_has_guild(guild_id: str):
+def bot_has_guild(guild_id):
 
     return (
         get_bot_guild(guild_id)
@@ -155,15 +197,11 @@ def bot_has_guild(guild_id: str):
     )
 
 
-def current_user_can_manage_guild(guild_id: str):
+# =========================================
+# DISCORD USER PERMISSION
+# =========================================
 
-    """
-    Basic protection:
-    make sure the logged-in Discord user
-    is actually an administrator of the guild.
-
-    This uses the guilds returned by Discord OAuth.
-    """
+def current_user_can_manage_guild(guild_id):
 
     try:
 
@@ -175,6 +213,7 @@ def current_user_can_manage_guild(guild_id: str):
             return False
 
         response = requests.get(
+
             "https://discord.com/api/users/@me/guilds",
 
             headers={
@@ -218,13 +257,11 @@ def current_user_can_manage_guild(guild_id: str):
         return False
 
 
-def require_guild_access(guild_id):
+# =========================================
+# REQUIRE GUILD ACCESS
+# =========================================
 
-    """
-    Validate:
-    1. Bot is in guild.
-    2. Logged-in user is administrator.
-    """
+def require_guild_access(guild_id):
 
     guild = get_bot_guild(
         guild_id
@@ -270,7 +307,7 @@ def home():
 
 
 # =========================================
-# HEALTH CHECK
+# HEALTH
 # =========================================
 
 @app.route("/health")
@@ -284,7 +321,7 @@ def health():
 
 
 # =========================================
-# DISCORD OAUTH LOGIN
+# LOGIN
 # =========================================
 
 @app.route("/auth/login")
@@ -299,9 +336,7 @@ def login():
 
     url = (
         "https://discord.com/oauth2/authorize?"
-        + requests.compat.urlencode(
-            params
-        )
+        + requests.compat.urlencode(params)
     )
 
     return redirect(url)
@@ -314,9 +349,7 @@ def login():
 @app.route("/auth/callback")
 def callback():
 
-    code = request.args.get(
-        "code"
-    )
+    code = request.args.get("code")
 
     if not code:
 
@@ -327,29 +360,16 @@ def callback():
 
     try:
 
-        # ---------------------------------
-        # Exchange code for access token
-        # ---------------------------------
-
         token_response = requests.post(
 
             "https://discord.com/api/oauth2/token",
 
             data={
-                "client_id":
-                    CLIENT_ID,
-
-                "client_secret":
-                    CLIENT_SECRET,
-
-                "grant_type":
-                    "authorization_code",
-
-                "code":
-                    code,
-
-                "redirect_uri":
-                    REDIRECT_URI
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": REDIRECT_URI
             },
 
             headers={
@@ -362,22 +382,17 @@ def callback():
 
         token_response.raise_for_status()
 
-        token_data = (
-            token_response.json()
-        )
+        token_data = token_response.json()
 
         access_token = token_data.get(
             "access_token"
         )
 
         if not access_token:
+
             raise RuntimeError(
                 "Discord did not return access token."
             )
-
-        # ---------------------------------
-        # Get Discord user
-        # ---------------------------------
 
         user_response = requests.get(
 
@@ -395,10 +410,6 @@ def callback():
 
         user = user_response.json()
 
-        # ---------------------------------
-        # Create Lunex JWT
-        # ---------------------------------
-
         token = sign_token({
 
             "discordId":
@@ -413,10 +424,6 @@ def callback():
             "accessToken":
                 access_token
         })
-
-        # ---------------------------------
-        # Redirect dashboard
-        # ---------------------------------
 
         return redirect(
 
@@ -490,7 +497,6 @@ def list_guilds():
                 )
             )
 
-            # Administrator
             if not (
                 permissions & 0x8
             ):
@@ -501,11 +507,9 @@ def list_guilds():
             if guild.get("icon"):
 
                 icon = (
-
                     "https://cdn.discordapp.com/"
                     f"icons/{guild['id']}/"
                     f"{guild['icon']}.png"
-
                 )
 
             result.append({
@@ -526,9 +530,7 @@ def list_guilds():
 
             })
 
-        return jsonify(
-            result
-        )
+        return jsonify(result)
 
     except Exception as e:
 
@@ -538,10 +540,8 @@ def list_guilds():
         )
 
         return jsonify({
-
             "error":
                 "تعذر جلب السيرفرات."
-
         }), 500
 
 
@@ -591,9 +591,7 @@ def get_channels(guild_id):
 
             })
 
-    return jsonify(
-        channels
-    )
+    return jsonify(channels)
 
 
 # =========================================
@@ -627,9 +625,7 @@ def get_categories(guild_id):
 
         })
 
-    return jsonify(
-        categories
-    )
+    return jsonify(categories)
 
 
 # =========================================
@@ -672,9 +668,7 @@ def get_roles(guild_id):
 
         })
 
-    return jsonify(
-        roles
-    )
+    return jsonify(roles)
 
 
 # =========================================
@@ -695,14 +689,21 @@ def read_settings(guild_id):
     if error:
         return error
 
+    if get_settings is None:
+
+        return jsonify({
+            "error":
+                "get_settings غير موجودة في bot.py"
+        }), 500
+
     try:
 
-        settings = get_settings(
-            guild_id
+        settings = run_async(
+            get_settings(
+                str(guild_id)
+            )
         )
 
-        # If get_settings somehow
-        # returns None
         if settings is None:
             settings = {}
 
@@ -718,10 +719,8 @@ def read_settings(guild_id):
         )
 
         return jsonify({
-
             "error":
                 "تعذر قراءة إعدادات السيرفر."
-
         }), 500
 
 
@@ -743,55 +742,47 @@ def write_settings(guild_id):
     if error:
         return error
 
+    if update_settings is None:
+
+        return jsonify({
+            "error":
+                "update_settings غير موجودة في bot.py"
+        }), 500
+
     body = request.get_json(
         silent=True
     ) or {}
 
-    allowed = {
+    allowed_keys = (
+        "welcome",
+        "leave",
+        "ticket",
+        "autoReplies",
+        "commandAliases"
+    )
 
-        "welcome":
-            body.get("welcome"),
+    update = {}
 
-        "leave":
-            body.get("leave"),
+    for key in allowed_keys:
 
-        "ticket":
-            body.get("ticket"),
+        if key in body:
 
-        "autoReplies":
-            body.get("autoReplies"),
-
-        "commandAliases":
-            body.get("commandAliases")
-
-    }
-
-    update = {
-
-        key: value
-
-        for key, value in allowed.items()
-
-        if value is not None
-
-    }
+            update[key] = body[key]
 
     if not update:
 
         return jsonify({
-
             "error":
                 "لا توجد إعدادات للتحديث."
-
         }), 400
 
     try:
 
-        result = update_settings(
-
-            guild_id,
-            update
-
+        result = run_async(
+            update_settings(
+                str(guild_id),
+                update
+            )
         )
 
         return jsonify(
@@ -806,15 +797,13 @@ def write_settings(guild_id):
         )
 
         return jsonify({
-
             "error":
                 "تعذر تحديث الإعدادات."
-
         }), 500
 
 
 # =========================================
-# TICKET SETTINGS
+# GET TICKET
 # =========================================
 
 @app.route(
@@ -831,14 +820,22 @@ def ticket_settings(guild_id):
     if error:
         return error
 
+    if get_settings is None:
+
+        return jsonify({
+            "error":
+                "get_settings غير موجودة في bot.py"
+        }), 500
+
     try:
 
-        settings = get_settings(
-            guild_id
+        settings = run_async(
+            get_settings(
+                str(guild_id)
+            )
         )
 
-        if not settings:
-            settings = {}
+        settings = settings or {}
 
         ticket = settings.get(
             "ticket",
@@ -857,15 +854,13 @@ def ticket_settings(guild_id):
         )
 
         return jsonify({
-
             "error":
                 "تعذر قراءة إعدادات التذاكر."
-
         }), 500
 
 
 # =========================================
-# UPDATE TICKET SETTINGS
+# UPDATE TICKET
 # =========================================
 
 @app.route(
@@ -881,6 +876,16 @@ def update_ticket_settings(guild_id):
 
     if error:
         return error
+
+    if (
+        get_settings is None
+        or update_settings is None
+    ):
+
+        return jsonify({
+            "error":
+                "دوال الإعدادات غير موجودة في bot.py"
+        }), 500
 
     body = request.get_json(
         silent=True
@@ -915,26 +920,20 @@ def update_ticket_settings(guild_id):
     if not ticket_update:
 
         return jsonify({
-
             "error":
                 "لم يتم إرسال إعدادات."
-
         }), 400
 
     # =====================================
-    # Validate channel
+    # CHANNEL
     # =====================================
 
-    if ticket_update.get(
-        "channelId"
-    ):
+    if ticket_update.get("channelId"):
 
         try:
 
             channel_id = int(
-                ticket_update[
-                    "channelId"
-                ]
+                ticket_update["channelId"]
             )
 
         except (
@@ -943,10 +942,8 @@ def update_ticket_settings(guild_id):
         ):
 
             return jsonify({
-
                 "error":
                     "channelId غير صحيح."
-
             }), 400
 
         channel = guild.get_channel(
@@ -956,10 +953,8 @@ def update_ticket_settings(guild_id):
         if not channel:
 
             return jsonify({
-
                 "error":
                     "روم التذاكر غير موجود."
-
             }), 400
 
         if not isinstance(
@@ -968,14 +963,12 @@ def update_ticket_settings(guild_id):
         ):
 
             return jsonify({
-
                 "error":
-                    "روم التذاكر يجب أن يكون روم نصي."
-
+                    "روم التذاكر يجب أن يكون نصيًا."
             }), 400
 
     # =====================================
-    # Validate categories
+    # CATEGORIES
     # =====================================
 
     for field in (
@@ -987,44 +980,39 @@ def update_ticket_settings(guild_id):
             field
         )
 
-        if value:
+        if not value:
+            continue
 
-            try:
+        try:
 
-                category_id = int(
-                    value
-                )
+            category_id = int(value)
 
-            except (
-                ValueError,
-                TypeError
-            ):
+        except (
+            ValueError,
+            TypeError
+        ):
 
-                return jsonify({
+            return jsonify({
+                "error":
+                    f"{field} غير صحيح."
+            }), 400
 
-                    "error":
-                        f"{field} غير صحيح."
+        category = guild.get_channel(
+            category_id
+        )
 
-                }), 400
+        if not isinstance(
+            category,
+            discord.CategoryChannel
+        ):
 
-            category = guild.get_channel(
-                category_id
-            )
-
-            if not isinstance(
-                category,
-                discord.CategoryChannel
-            ):
-
-                return jsonify({
-
-                    "error":
-                        f"{field} غير صحيح."
-
-                }), 400
+            return jsonify({
+                "error":
+                    f"{field} غير صحيح."
+            }), 400
 
     # =====================================
-    # Validate support role
+    # SUPPORT ROLE
     # =====================================
 
     role_id = ticket_update.get(
@@ -1049,20 +1037,20 @@ def update_ticket_settings(guild_id):
         if not role:
 
             return jsonify({
-
                 "error":
                     "رتبة الدعم غير موجودة."
-
             }), 400
 
     # =====================================
-    # Save
+    # SAVE
     # =====================================
 
     try:
 
-        old_settings = get_settings(
-            guild_id
+        old_settings = run_async(
+            get_settings(
+                str(guild_id)
+            )
         ) or {}
 
         old_ticket = old_settings.get(
@@ -1075,15 +1063,14 @@ def update_ticket_settings(guild_id):
             **ticket_update
         }
 
-        result = update_settings(
-
-            guild_id,
-
-            {
-                "ticket":
-                    new_ticket
-            }
-
+        result = run_async(
+            update_settings(
+                str(guild_id),
+                {
+                    "ticket":
+                        new_ticket
+                }
+            )
         )
 
         return jsonify({
@@ -1109,10 +1096,8 @@ def update_ticket_settings(guild_id):
         )
 
         return jsonify({
-
             "error":
                 "تعذر حفظ إعدادات التذاكر."
-
         }), 500
 
 
@@ -1134,6 +1119,16 @@ def post_ticket(guild_id):
     if error:
         return error
 
+    if post_ticket_panel is None:
+
+        return jsonify({
+
+            "error":
+                "post_ticket_panel غير موجودة في bot.py. "
+                "ارفع نسخة bot.py الجديدة."
+
+        }), 500
+
     body = request.get_json(
         silent=True
     ) or {}
@@ -1145,10 +1140,8 @@ def post_ticket(guild_id):
     if not channel_id:
 
         return jsonify({
-
             "error":
                 "يجب اختيار روم التذاكر."
-
         }), 400
 
     try:
@@ -1163,10 +1156,8 @@ def post_ticket(guild_id):
     ):
 
         return jsonify({
-
             "error":
                 "معرف الروم غير صحيح."
-
         }), 400
 
     channel = guild.get_channel(
@@ -1176,10 +1167,8 @@ def post_ticket(guild_id):
     if not channel:
 
         return jsonify({
-
             "error":
                 "الروم غير موجود."
-
         }), 404
 
     if not isinstance(
@@ -1188,56 +1177,24 @@ def post_ticket(guild_id):
     ):
 
         return jsonify({
-
             "error":
                 "الروم يجب أن يكون روم نصي."
-
         }), 400
-
-    # =====================================
-    # Discord event loop
-    # =====================================
-
-    if not bot.is_ready():
-
-        return jsonify({
-
-            "error":
-                "Discord bot غير جاهز بعد."
-
-        }), 503
-
-    loop = bot.loop
-
-    if loop is None:
-
-        return jsonify({
-
-            "error":
-                "Discord bot event loop غير جاهز."
-
-        }), 503
 
     try:
 
-        future = (
-            asyncio
-            .run_coroutine_threadsafe(
+        run_async(
 
-                post_ticket_panel(
+            post_ticket_panel(
 
-                    guild_id,
-                    str(channel_id)
+                str(guild_id),
 
-                ),
+                str(channel_id)
 
-                loop
+            ),
 
-            )
-        )
-
-        future.result(
             timeout=20
+
         )
 
         return jsonify({
@@ -1269,7 +1226,7 @@ def post_ticket(guild_id):
         return jsonify({
 
             "error":
-                "تعذر نشر لوحة التذاكر."
+                f"تعذر نشر لوحة التذاكر: {e}"
 
         }), 500
 
@@ -1304,10 +1261,6 @@ def run_bot():
 
 if __name__ == "__main__":
 
-    # -------------------------------------
-    # Start Discord bot
-    # -------------------------------------
-
     bot_thread = threading.Thread(
 
         target=run_bot,
@@ -1324,20 +1277,12 @@ if __name__ == "__main__":
         "🌐 Starting Lunex API..."
     )
 
-    # -------------------------------------
-    # Railway PORT
-    # -------------------------------------
-
     port = int(
         os.getenv(
             "PORT",
             "5000"
         )
     )
-
-    # -------------------------------------
-    # Start Flask
-    # -------------------------------------
 
     app.run(
 
