@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lunex Bot</title>
+    <!-- استدعاء مكتبة Tailwind CSS للتصميم الفخم والسريع -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- استدعاء FontAwesome للأيقونات -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+        /* خلفية فخمة للرئيسية - لون رصاصي مع منظر طبيعي داكن */
+        .hero-bg {
+            background: linear-gradient(rgba(26, 26, 26, 0.8), rgba(26, 26, 26, 0.9)), 
+                        url('https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?q=80&w=1920&auto=format&fit=crop') no-repeat center center;
+            background-size: cover;
+        }
+        /* تأثيرات الزجاج للأقسام */
+        .glass-panel {
+            background: rgba(45, 45, 45, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        /* إخفاء الأقسام غير النشطة */
+        .hidden-section {
+            display: none;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col relative">
+
+    <!-- شريط التنقل العلوي -->
+    <nav class="w-full p-4 flex justify-between items-center absolute top-0 z-50 glass-panel">
+        <!-- اليمين: تسجيل الدخول والكتاب -->
+        <div class="flex items-center gap-4">
+            <button onclick="showSection('dashboard')" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-bold transition">
+                <i class="fa-brands fa-discord mr-2"></i> Login 
+            </button>
+            <div class="relative group cursor-pointer">
+                <i class="fa-solid fa-book text-2xl text-gray-300 hover:text-white transition"></i>
+                <div class="absolute right-0 mt-2 w-48 glass-panel rounded-lg shadow-lg hidden group-hover:block border border-gray-600">
+                    <a href="#" onclick="showSection('tos')" class="block px-4 py-2 hover:bg-gray-700 rounded-t-lg">شروط الخدمة</a>
+                    <a href="#" onclick="showSection('privacy')" class="block px-4 py-2 hover:bg-gray-700 rounded-b-lg">سياسة الخصوصية</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- اليسار: النقاط الثلاث (تغيير اللغة) -->
+        <div class="relative group cursor-pointer">
+            <i class="fa-solid fa-ellipsis-vertical text-2xl text-gray-300 hover:text-white px-2"></i>
+            <div class="absolute left-0 mt-2 w-32 glass-panel rounded-lg shadow-lg hidden group-hover:block border border-gray-600 text-center">
+                <a href="#" class="block px-4 py-2 hover:bg-gray-700 rounded-t-lg">العربية</a>
+                <a href="#" class="block px-4 py-2 hover:bg-gray-700 rounded-b-lg">English</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 1. الصفحة الرئيسية -->
+    <section id="home" class="hero-bg flex-grow flex flex-col items-center justify-center text-center p-6 min-h-screen">
+        <h1 class="text-7xl md:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-r from-gray-300 to-gray-500 mb-2 drop-shadow-lg">
+            Lunex
+        </h1>
+        <p class="text-gray-400 text-lg mb-8 max-w-xl">أقوى بوت لإدارة سيرفرك بفخامة وسهولة</p>
+        
+        <div class="flex flex-col gap-4 w-full max-w-xs">
+            <button onclick="showSection('dashboard')" class="bg-indigo-600 hover:bg-indigo-500 py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition shadow-lg shadow-indigo-500/30">
+                <i class="fa-brands fa-discord"></i> Login to Discord
+            </button>
+            <a href="https://discord.gg/Jjac8XCrq" target="_blank" class="bg-gray-700 hover:bg-gray-600 py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 transition border border-gray-600">
+                <i class="fa-solid fa-headset"></i> Support
+            </a>
+        </div>
+    </section>
+
+    <!-- 2. شروط الخدمة -->
+    <section id="tos" class="hidden-section flex-grow pt-24 p-6 max-w-4xl mx-auto">
+        <button onclick="showSection('home')" class="text-indigo-400 mb-6 hover:text-indigo-300"><i class="fa-solid fa-arrow-right"></i> العودة للرئيسية</button>
+        <div class="glass-panel p-8 rounded-2xl">
+            <h2 class="text-3xl font-bold mb-4 text-center">شروط الخدمة — Lunex</h2>
+            <p class="text-gray-400 text-sm mb-6 text-center">آخر تحديث: 12 أغسطس 2026</p>
+            <div class="space-y-6 text-gray-200 leading-relaxed">
+                <p>مرحباً بك في Lunex. باستخدامك للبوت أو أي من خدمات Lunex، فإنك توافق على الالتزام بشروط الخدمة الموضحة أدناه. إذا كنت لا توافق على هذه الشروط، يرجى عدم استخدام خدمات Lunex.</p>
+                
+                <h3 class="text-xl font-bold text-indigo-400">1. استخدام الخدمة</h3>
+                <p>يجب استخدام Lunex بطريقة مسؤولة ووفقاً لقواعد Discord والقوانين المعمول بها. يُمنع استخدام Lunex من أجل:</p>
+                <ul class="list-disc list-inside text-gray-300 space-y-1">
+                    <li>استغلال الثغرات أو الأخطاء في البوت.</li>
+                    <li>محاولة تعطيل البوت أو إلحاق الضرر بالخدمة.</li>
+                    <li>استخدام البوت في أنشطة غير قانونية.</li>
+                    <li>محاولة الوصول إلى بيانات أو صلاحيات غير مصرح بها.</li>
+                    <li>إساءة استخدام أوامر البوت أو الخدمات المقدمة.</li>
+                </ul>
+
+                <h3 class="text-xl font-bold text-indigo-400">2. مسؤولية المستخدم</h3>
+                <p>أنت مسؤول عن طريقة استخدام Lunex داخل السيرفر الخاص بك، وعن الصلاحيات التي تمنحها للبوت. كما أن مسؤولي السيرفر مسؤولون عن إعدادات البوت والميزات التي يتم تفعيلها داخله.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">3. توفر الخدمة</h3>
+                <p>نحاول إبقاء Lunex متاحاً ومستقراً قدر الإمكان، ولكن لا نضمن أن الخدمة ستعمل دون انقطاع أو أخطاء. قد يتم إيقاف البوت أو بعض ميزاته مؤقتاً بسبب الصيانة، المشاكل التقنية، تحديثات Discord، أو أسباب أمنية.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">4. التعديلات</h3>
+                <p>قد نقوم بتحديث Lunex أو إضافة ميزات جديدة أو إزالة ميزات موجودة في أي وقت. استمرارك في استخدام Lunex بعد تحديث الشروط يعني موافقتك على النسخة الجديدة.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">5. إيقاف الوصول</h3>
+                <p>يحق لفريق Lunex تقييد أو إيقاف استخدام البوت في حال وجود إساءة استخدام أو مخالفة لهذه الشروط.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">6. الخدمات الخارجية</h3>
+                <p>قد يعتمد Lunex على خدمات أو منصات خارجية مثل Discord أو خدمات تخزين البيانات. قد تخضع هذه الخدمات لشروط وسياسات خصوصية خاصة بها.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">7. إخلاء المسؤولية</h3>
+                <p>يتم توفير Lunex كما هو، ونسعى لتقديم خدمة موثوقة ومستقرة، ولكن لا نضمن خلو الخدمة من الأخطاء أو التوقفات.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">8. التواصل</h3>
+                <p>إذا كان لديك سؤال أو مشكلة تتعلق بشروط الخدمة، يمكنك التواصل مع فريق Lunex من خلال وسائل التواصل الرسمية الموجودة في موقعنا. باستخدام Lunex، فإنك تؤكد أنك قرأت هذه الشروط وفهمتها ووافقت عليها.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. سياسة الخصوصية -->
+    <section id="privacy" class="hidden-section flex-grow pt-24 p-6 max-w-4xl mx-auto">
+        <button onclick="showSection('home')" class="text-indigo-400 mb-6 hover:text-indigo-300"><i class="fa-solid fa-arrow-right"></i> العودة للرئيسية</button>
+        <div class="glass-panel p-8 rounded-2xl">
+            <h2 class="text-3xl font-bold mb-4 text-center">سياسة الخصوصية — Lunex</h2>
+            <p class="text-gray-400 text-sm mb-6 text-center">آخر تحديث: 12 أغسطس 2026</p>
+            <div class="space-y-6 text-gray-200 leading-relaxed">
+                <p>نحن في Lunex نحترم خصوصية المستخدمين ونلتزم بالتعامل مع البيانات بطريقة مسؤولة. توضح هذه السياسة أنواع البيانات التي قد يتم التعامل معها وكيفية استخدامها.</p>
+                
+                <h3 class="text-xl font-bold text-indigo-400">1. البيانات التي قد يتم جمعها</h3>
+                <p>قد يقوم Lunex بتخزين أو معالجة بعض البيانات اللازمة لتشغيل ميزاته، مثل:</p>
+                <ul class="list-disc list-inside text-gray-300 space-y-1">
+                    <li>معرف المستخدم في Discord (User ID).</li>
+                    <li>معرف السيرفر (Server ID).</li>
+                    <li>إعدادات السيرفر المرتبطة بالبوت، الترحيب، التذاكر، الأوامر، والـ XP.</li>
+                </ul>
+
+                <h3 class="text-xl font-bold text-indigo-400">2. كيفية استخدام البيانات</h3>
+                <p>تُستخدم البيانات من أجل تشغيل ميزات Lunex، حفظ إعدادات السيرفر، توفير أنظمة المستويات والتذاكر، وتحسين أداء واستقرار البوت وحمايته.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">3. مشاركة البيانات</h3>
+                <p>لا نقوم ببيع بيانات المستخدمين. قد تتم معالجة بعض البيانات من خلال الخدمات التقنية التي يعتمد عليها Lunex بالقدر اللازم لتوفير الخدمة.</p>
+
+                <h3 class="text-xl font-bold text-indigo-400">4. حماية والاحتفاظ وحذف البيانات</h3>
+                <p>نحاول اتخاذ إجراءات مناسبة لحماية البيانات. نحتفظ بها فقط طالما هناك حاجة لتشغيل الخدمات. يمكنك طلب حذف بيانات سيرفرك بالتواصل مع فريق الدعم.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. لوحة التحكم (Dashboard) -->
+    <section id="dashboard" class="hidden-section flex-grow pt-24 p-6 max-w-5xl mx-auto w-full">
+        <div class="flex justify-between items-center mb-8 border-b border-gray-700 pb-4">
+            <h2 class="text-3xl font-bold">Dashboard</h2>
+            <button onclick="showSection('home')" class="text-red-400 hover:text-red-300"><i class="fa-solid fa-sign-out-alt"></i> Logout</button>
+        </div>
+        
+        <p class="text-gray-400 mb-6 text-lg">اختر السيرفر الذي تريد إدارته:</p>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- كرت سيرفر -->
+            <div class="glass-panel p-6 rounded-2xl flex flex-col items-center text-center border border-gray-600 hover:border-indigo-500 transition">
+                <div class="w-20 h-20 bg-gray-700 rounded-full mb-4 flex items-center justify-center text-2xl font-bold">S</div>
+                <h3 class="text-xl font-bold mb-4">Sayanzi Community</h3>
+                <button onclick="showSection('manager')" class="w-full bg-indigo-600 hover:bg-indigo-500 py-2 rounded-lg font-bold transition">Manager</button>
+            </div>
+            
+            <!-- كرت سيرفر 2 -->
+            <div class="glass-panel p-6 rounded-2xl flex flex-col items-center text-center border border-gray-600 hover:border-indigo-500 transition">
+                <div class="w-20 h-20 bg-gray-700 rounded-full mb-4 flex items-center justify-center text-2xl font-bold">L</div>
+                <h3 class="text-xl font-bold mb-4">Lunex Support</h3>
+                <button onclick="showSection('manager')" class="w-full bg-indigo-600 hover:bg-indigo-500 py-2 rounded-lg font-bold transition">Manager</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. إدارة السيرفر (Manager) -->
+    <section id="manager" class="hidden-section flex-grow pt-24 p-6 max-w-5xl mx-auto w-full">
+        <button onclick="showSection('dashboard')" class="text-indigo-400 mb-6 hover:text-indigo-300"><i class="fa-solid fa-arrow-right"></i> العودة للسيرفرات</button>
+        <h2 class="text-3xl font-bold mb-8">إدارة السيرفر</h2>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- نظام التذاكر -->
+            <div class="glass-panel p-6 rounded-2xl border border-gray-600">
+                <div class="flex items-center gap-3 mb-4">
+                    <i class="fa-solid fa-ticket text-2xl text-indigo-400"></i>
+                    <h3 class="text-xl font-bold">Ticket Panel</h3>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">قم بإنشاء لوحة تذاكر احترافية للسيرفر بنظام Embed.</p>
+                <form class="space-y-4">
+                    <div>
+                        <label class="block text-sm mb-1">صورة البانر (400×800)</label>
+                        <input type="text" placeholder="رابط الصورة (URL)" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">كاتيجوري (Category ID)</label>
+                        <input type="text" placeholder="أيدي الكاتيجوري لفتح التذاكر" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">الروم (Channel ID)</label>
+                        <input type="text" placeholder="أيدي روم اللوحة" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">الوصف</label>
+                        <textarea placeholder="وصف رسالة التذكرة..." class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-indigo-500 h-20"></textarea>
+                    </div>
+                    <button type="button" class="w-full bg-indigo-600 hover:bg-indigo-500 py-2 rounded-lg font-bold transition mt-2">Add (Embed)</button>
+                </form>
+            </div>
+
+            <!-- اختصارات الأوامر -->
+            <div class="glass-panel p-6 rounded-2xl border border-gray-600">
+                <div class="flex items-center gap-3 mb-4">
+                    <i class="fa-solid fa-terminal text-2xl text-green-400"></i>
+                    <h3 class="text-xl font-bold">Edit Commands</h3>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">قم بإنشاء اختصارات لأوامر البوت لتسهيل استخدامها.</p>
+                <form class="space-y-4">
+                    <div>
+                        <label class="block text-sm mb-1">الأمر الأصلي</label>
+                        <select class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-green-500">
+                            <option>/timeout</option>
+                            <option>/ban</option>
+                            <option>/kick</option>
+                            <option>/warn</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">الاختصار الجديد</label>
+                        <input type="text" placeholder="مثال: /time" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-green-500">
+                    </div>
+                    <button type="button" class="w-full bg-green-600 hover:bg-green-500 py-2 rounded-lg font-bold transition mt-2">Add Alias</button>
+                </form>
+            </div>
+
+            <!-- الترحيب والمغادرة -->
+            <div class="glass-panel p-6 rounded-2xl border border-gray-600">
+                <div class="flex items-center gap-3 mb-4">
+                    <i class="fa-solid fa-door-open text-2xl text-yellow-400"></i>
+                    <h3 class="text-xl font-bold">Welcome & Leave</h3>
+                </div>
+                <p class="text-gray-400 text-sm mb-4">إعدادات رسائل الترحيب والمغادرة للأعضاء.</p>
+                <div class="flex gap-2 mb-4">
+                    <button class="flex-1 bg-yellow-600 hover:bg-yellow-500 py-2 rounded-lg text-sm font-bold transition">Add Welcome</button>
+                    <button class="flex-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 py-2 rounded-lg text-sm font-bold transition">Add Leave</button>
+                </div>
+                <form class="space-y-4">
+                    <div>
+                        <label class="block text-sm mb-1">الروم (Channel ID)</label>
+                        <input type="text" placeholder="أيدي الروم" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-yellow-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm mb-1">نص الرسالة</label>
+                        <textarea placeholder="أهلاً بك [user] في السيرفر!" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 focus:outline-none focus:border-yellow-500 h-20"></textarea>
+                    </div>
+                    <div class="flex items-center gap-3 mt-2">
+                        <input type="checkbox" id="imgToMsg" class="w-5 h-5 accent-yellow-500">
+                        <label for="imgToMsg" class="text-sm cursor-pointer">Img to message (إرفاق صورة العضو)</label>
+                    </div>
+                    <button type="button" class="w-full bg-yellow-600 hover:bg-yellow-500 py-2 rounded-lg font-bold transition mt-2">Save Settings</button>
+                </form>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- سكربت التنقل بين الصفحات -->
+    <script>
+        function showSection(sectionId) {
+            // إخفاء جميع الأقسام
+            const sections = ['home', 'tos', 'privacy', 'dashboard', 'manager'];
+            sections.forEach(id => {
+                document.getElementById(id).classList.add('hidden-section');
+            });
+            
+            // إظهار القسم المطلوب
+            document.getElementById(sectionId).classList.remove('hidden-section');
+            
+            // التمرير لأعلى الصفحة
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
+

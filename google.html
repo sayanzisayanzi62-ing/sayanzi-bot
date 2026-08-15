@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google</title>
+    <!-- استدعاء Tailwind CSS للتصميم -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            background-color: #202124; /* لون خلفية جوجل الداكن */
+            color: #e8eaed;
+        }
+        .google-logo {
+            font-size: 5.5rem;
+            font-weight: 700;
+            letter-spacing: -3px;
+        }
+        .google-g { color: #4285f4; }
+        .google-o1 { color: #ea4335; }
+        .google-o2 { color: #fbbc05; }
+        .google-l { color: #4285f4; }
+        .google-e { color: #34a853; }
+        
+        .search-box {
+            background-color: #303134;
+            border: 1px solid #5f6368;
+            transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s;
+        }
+        .search-box:hover, .search-box:focus-within {
+            background-color: #303134;
+            box-shadow: 0 1px 6px rgba(32,33,36,.28);
+            border-color: rgba(223,225,229,0);
+        }
+        input:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between">
+
+    <!-- الشريط العلوي -->
+    <nav class="w-full flex justify-end p-4 text-sm">
+        <div class="flex items-center gap-4">
+            <a href="#" class="hover:underline">Gmail</a>
+            <a href="#" class="hover:underline">صور</a>
+            <i class="fa-solid fa-bars cursor-pointer hover:bg-gray-700 p-2 rounded-full transition text-lg"></i>
+            <div class="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center font-bold cursor-pointer">
+                S
+            </div>
+        </div>
+    </nav>
+
+    <!-- المنتصف (الشعار والبحث) -->
+    <main class="flex flex-col items-center w-full px-4 -mt-20">
+        <!-- شعار جوجل -->
+        <div class="google-logo mb-6 flex select-none">
+            <span class="google-g">G</span>
+            <span class="google-o1">o</span>
+            <span class="google-o2">o</span>
+            <span class="google-g">g</span>
+            <span class="google-l">l</span>
+            <span class="google-e">e</span>
+        </div>
+
+        <!-- مربع البحث -->
+        <form action="https://www.google.com/search" method="GET" class="w-full max-w-2xl relative">
+            <div class="search-box w-full flex items-center rounded-full px-4 py-3">
+                <i class="fa-solid fa-magnifying-glass text-gray-400 mr-3"></i>
+                <input type="text" name="q" class="w-full bg-transparent border-none text-white text-base mr-3" placeholder="ابحث في Google أو اكتب عنوان URL" autocomplete="off" autofocus>
+                <i class="fa-solid fa-microphone text-gray-400 text-lg cursor-pointer hover:text-white transition"></i>
+            </div>
+            
+            <!-- أزرار البحث -->
+            <div class="flex justify-center gap-3 mt-8">
+                <button type="submit" class="bg-[#303134] text-[#e8eaed] hover:border-gray-500 border border-transparent px-4 py-2 rounded text-sm transition">
+                    بحث Google
+                </button>
+                <button type="button" class="bg-[#303134] text-[#e8eaed] hover:border-gray-500 border border-transparent px-4 py-2 rounded text-sm transition">
+                    ضربة حظ
+                </button>
+            </div>
+        </form>
+    </main>
+
+    <!-- الشريط السفلي -->
+    <footer class="w-full bg-[#171717] text-[#9aa0a6] text-sm">
+        <div class="px-8 py-3 border-b border-[#3c4043]">
+            ليبيا
+        </div>
+        <div class="px-8 py-3 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex gap-6">
+                <a href="#" class="hover:underline">لمحة عن Google</a>
+                <a href="#" class="hover:underline">الإعلانات</a>
+                <a href="#" class="hover:underline">الأعمال</a>
+                <a href="#" class="hover:underline">آلية عمل بحث Google</a>
+            </div>
+            <div class="flex gap-6">
+                <a href="#" class="hover:underline">الخصوصية</a>
+                <a href="#" class="hover:underline">البنود</a>
+                <a href="#" class="hover:underline">الإعدادات</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
+

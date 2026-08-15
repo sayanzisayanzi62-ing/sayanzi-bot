@@ -32,7 +32,7 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 
 SITE_URL = os.getenv("FRONTEND_URL", "https://lunexbot.netlify.app")
 SUPPORT_INVITE = "https://discord.gg/FMEXcwAvg"
-BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348&permissions=8&integration_type=0&scope=bot"
+BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1501541120058851348&permissions=8&scope=bot"
 
 DB_PATH = os.getenv("SQLITE_PATH", "lunex.db")
 
@@ -175,12 +175,14 @@ DEFAULT_SETTINGS = {
     "welcome": {
         "enabled": False,
         "channelId": None,
-        "message": "Welcome {user}!"
+        "message": "Welcome {user}!",
+        "showAvatar": False
     },
     "leave": {
         "enabled": False,
         "channelId": None,
-        "message": "{user} has left the server."
+        "message": "{user} has left the server.",
+        "showAvatar": False
     },
     "ticket": {
         "enabled": False,
@@ -521,6 +523,63 @@ async def remove_warning(guild_id, user_id):
 
 
 # ============================================================
+# DURATION PARSING — "10m", "1h30m", "2d", plain "10" (= minutes)
+# ============================================================
+
+DURATION_UNIT_RE = re.compile(r"(\d+)\s*([smhdw])", re.IGNORECASE)
+
+
+def parse_duration(text):
+    """Parses '10m', '1h30m', '2d', '45s', '1w', or a plain integer (minutes).
+    Returns a timedelta, or None if the text couldn't be parsed."""
+    if not text:
+        return None
+    text = text.strip().lower()
+
+    if text.isdigit():
+        return timedelta(minutes=int(text))
+
+    matches = DURATION_UNIT_RE.findall(text)
+    if not matches:
+        return None
+
+    total = timedelta()
+    for amount, unit in matches:
+        amount = int(amount)
+        if unit == "s":
+            total += timedelta(seconds=amount)
+        elif unit == "m":
+            total += timedelta(minutes=amount)
+        elif unit == "h":
+            total += timedelta(hours=amount)
+        elif unit == "d":
+            total += timedelta(days=amount)
+        elif unit == "w":
+            total += timedelta(weeks=amount)
+    return total
+
+
+def format_duration(delta):
+    total = int(delta.total_seconds())
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+    if seconds and not parts:
+        parts.append(f"{seconds}s")
+    return " ".join(parts) if parts else "0s"
+
+
+MAX_TIMEOUT = timedelta(days=28)
+
+
+# ============================================================
 # HELP / COMMANDS — بنفس ستايلنا (فخم)
 # ============================================================
 
@@ -568,6 +627,11 @@ class HelpSelect(discord.ui.Select):
             embed.add_field(
                 name="__**⭐ XP Management**__",
                 value="**/xp_add** | **/xp_remove** | **/xp_reset**\n**/level_set** | **/level_reset** | **/level_roll**",
+                inline=False
+            )
+            embed.add_field(
+                name="__**🎫 Tickets**__",
+                value="**/ticket_panel** — نشر لوحة فتح التذاكر",
                 inline=False
             )
             embed.add_field(
@@ -872,22 +936,32 @@ async def unban_command(interaction: discord.Interaction, user_id: str):
 
 
 # ============================================================
-# STAFF — /TIMEOUT
+# STAFF — /TIMEOUT  (now accepts flexible durations: 10m, 1h30m, 2d, 45s ...)
 # ============================================================
 
 @bot.tree.command(name="timeout", description="إعطاء Timeout")
-@app_commands.describe(member="العضو", minutes="المدة بالدقائق", reason="السبب")
+@app_commands.describe(member="العضو", duration="المدة، مثال: 10m أو 1h30m أو 2d", reason="السبب")
 @app_commands.default_permissions(moderate_members=True)
-async def timeout_command(interaction: discord.Interaction, member: discord.Member, minutes: app_commands.Range[int, 1, 40320], reason: str = "No reason provided"):
+async def timeout_command(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason provided"):
     if not interaction.user.guild_permissions.moderate_members:
         await interaction.response.send_message("❌ تحتاج Moderate Members.", ephemeral=True)
         return
     if member.top_role >= interaction.user.top_role:
         await interaction.response.send_message("❌ لا يمكنك Timeout لهذا العضو.", ephemeral=True)
         return
+
+    delta = parse_duration(duration)
+    if not delta or delta.total_seconds() <= 0:
+        await interaction.response.send_message("❌ صيغة المدة غير صحيحة. مثال: `10m`، `1h30m`، `2d`.", ephemeral=True)
+        return
+    if delta > MAX_TIMEOUT:
+        delta = MAX_TIMEOUT
+
     try:
-        await member.timeout(timedelta(minutes=minutes), reason=reason)
-        await interaction.response.send_message(f"🔇 تم إعطاء Timeout لـ {member.mention} لمدة **{minutes} دقيقة**.")
+        await member.timeout(delta, reason=reason)
+        await interaction.response.send_message(
+            f"🔇 تم إعطاء Timeout لـ {member.mention} لمدة **{format_duration(delta)}**.\n**السبب:** {reason}"
+        )
     except discord.Forbidden:
         await interaction.response.send_message("❌ لا أستطيع إعطاء Timeout لهذا العضو.", ephemeral=True)
 
@@ -1356,6 +1430,354 @@ async def role_remove_command(interaction: discord.Interaction, member: discord.
 
 
 # ============================================================
+# TICKET SYSTEM — driven entirely by settings.ticket from the website
+# ============================================================
+
+TICKET_OPEN_CUSTOM_ID = "lunex_ticket_open"
+TICKET_CLOSE_CUSTOM_ID = "lunex_ticket_close"
+
+
+class TicketCloseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="إغلاق التذكرة", emoji="🔒", style=discord.ButtonStyle.red, custom_id=TICKET_CLOSE_CUSTOM_ID)
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        settings = await get_settings(guild.id)
+        ticket = settings.get("ticket", {})
+
+        is_staff = interaction.user.guild_permissions.manage_guild
+        opener_allowed = ticket.get("allowUserClose", True)
+        if not is_staff and not opener_allowed:
+            await interaction.response.send_message("❌ لا تملك صلاحية إغلاق التذكرة.", ephemeral=True)
+            return
+
+        await interaction.response.send_message("🔒 يتم إغلاق التذكرة...", ephemeral=True)
+
+        if ticket.get("deleteAfterClose"):
+            try:
+                await interaction.channel.delete(reason=f"Ticket closed by {interaction.user}")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return
+
+        try:
+            closed_category = None
+            if ticket.get("closedCategoryId"):
+                closed_category = guild.get_channel(int(ticket["closedCategoryId"]))
+            if closed_category:
+                await interaction.channel.edit(category=closed_category, reason="Ticket closed")
+            await interaction.channel.set_permissions(guild.default_role, view_channel=False)
+            for target in list(interaction.channel.overwrites.keys()):
+                if isinstance(target, discord.Member):
+                    await interaction.channel.set_permissions(target, send_messages=False)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+
+class TicketPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="فتح تذكرة", emoji="🎫", style=discord.ButtonStyle.blurple, custom_id=TICKET_OPEN_CUSTOM_ID)
+    async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        settings = await get_settings(guild.id)
+        ticket = settings.get("ticket", {})
+
+        if not ticket.get("enabled"):
+            await interaction.response.send_message("❌ نظام التذاكر غير مفعل حالياً.", ephemeral=True)
+            return
+
+        channel_name = f"ticket-{interaction.user.id}"
+        existing = discord.utils.get(guild.text_channels, name=channel_name)
+        if existing:
+            await interaction.response.send_message(f"❌ لديك تذكرة مفتوحة بالفعل: {existing.mention}", ephemeral=True)
+            return
+
+        category = None
+        if ticket.get("categoryId"):
+            category = guild.get_channel(int(ticket["categoryId"]))
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        }
+        role_id = ticket.get("supportRoleId")
+        if role_id:
+            role = guild.get_role(int(role_id))
+            if role:
+                overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+
+        try:
+            channel = await guild.create_text_channel(
+                name=channel_name,
+                category=category,
+                overwrites=overwrites,
+                reason=f"Ticket opened by {interaction.user}"
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ لا أملك صلاحية إنشاء الروم.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=ticket.get("description") or "Lunex Support",
+            description=ticket.get("message") or "Open a ticket using the button below.",
+            color=discord.Color.blurple()
+        )
+        if ticket.get("image"):
+            embed.set_image(url=ticket["image"])
+
+        try:
+            await channel.send(content=interaction.user.mention, embed=embed, view=TicketCloseView())
+        except discord.HTTPException:
+            pass
+
+        await interaction.response.send_message(f"✅ تم فتح تذكرتك: {channel.mention}", ephemeral=True)
+
+
+# ============================================================
+# STAFF — /TICKET_PANEL — posts the open-ticket button using website settings
+# ============================================================
+
+@bot.tree.command(name="ticket_panel", description="نشر لوحة فتح التذاكر")
+@app_commands.default_permissions(manage_guild=True)
+async def ticket_panel_command(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("❌ تحتاج Manage Server.", ephemeral=True)
+        return
+
+    settings = await get_settings(interaction.guild.id)
+    ticket = settings.get("ticket", {})
+    if not ticket.get("enabled"):
+        await interaction.response.send_message("❌ فعّل نظام التذاكر من لوحة التحكم أولاً.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title=ticket.get("description") or "Lunex Support",
+        description=ticket.get("message") or "Open a ticket using the button below.",
+        color=discord.Color.blurple()
+    )
+    if ticket.get("image"):
+        embed.set_image(url=ticket["image"])
+
+    target_channel = interaction.channel
+    if ticket.get("channelId"):
+        configured = interaction.guild.get_channel(int(ticket["channelId"]))
+        if configured:
+            target_channel = configured
+
+    try:
+        await target_channel.send(embed=embed, view=TicketPanelView())
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ لا أملك صلاحية الإرسال في هذه القناة.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"✅ تم نشر لوحة التذاكر في {target_channel.mention}.", ephemeral=True)
+
+
+# ============================================================
+# WELCOME / LEAVE — driven by settings.welcome / settings.leave from the website
+# ============================================================
+
+def render_template(template, member):
+    text = template or ""
+    return (
+        text.replace("{user}", member.mention)
+            .replace("{username}", str(member))
+            .replace("{server}", member.guild.name)
+    )
+
+
+@bot.event
+async def on_member_join(member):
+    try:
+        settings = await get_settings(member.guild.id)
+        welcome = settings.get("welcome", {})
+        if not welcome.get("enabled"):
+            return
+        channel_id = welcome.get("channelId")
+        if not channel_id:
+            return
+        channel = member.guild.get_channel(int(channel_id))
+        if not channel:
+            return
+
+        text = render_template(welcome.get("message") or "Welcome {user}!", member)
+        if welcome.get("showAvatar"):
+            embed = discord.Embed(description=text, color=discord.Color.blurple())
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await channel.send(embed=embed)
+        else:
+            await channel.send(text)
+    except Exception as e:
+        print("❌ Welcome error:", repr(e))
+
+
+@bot.event
+async def on_member_remove(member):
+    try:
+        settings = await get_settings(member.guild.id)
+        leave = settings.get("leave", {})
+        if not leave.get("enabled"):
+            return
+        channel_id = leave.get("channelId")
+        if not channel_id:
+            return
+        channel = member.guild.get_channel(int(channel_id))
+        if not channel:
+            return
+
+        text = render_template(leave.get("message") or "{user} has left the server.", member)
+        if leave.get("showAvatar"):
+            embed = discord.Embed(description=text, color=discord.Color.red())
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await channel.send(embed=embed)
+        else:
+            await channel.send(text)
+    except Exception as e:
+        print("❌ Leave error:", repr(e))
+
+
+# ============================================================
+# AUTO REPLIES — driven by settings.autoReplies from the website
+# ============================================================
+
+async def process_auto_replies(message):
+    settings = await get_settings(message.guild.id)
+    replies = settings.get("autoReplies", [])
+    if not replies:
+        return False
+
+    content = message.content.strip().lower()
+    for entry in replies:
+        trigger = (entry.get("trigger") or "").strip().lower()
+        response = entry.get("response") or ""
+        if trigger and response and trigger == content:
+            try:
+                await message.channel.send(response)
+            except discord.HTTPException:
+                pass
+            return True
+    return False
+
+
+# ============================================================
+# COMMAND ALIASES — driven by settings.commandAliases from the website
+# Example stored as {"timeout": "تايم @user duration"} lets members type
+# "تايم @user 10m" instead of using the /timeout slash command.
+# ============================================================
+
+ALIAS_TOKEN_RE = re.compile(r"@user|duration|reason|amount")
+
+
+def build_alias_regex(pattern):
+    tokens = pattern.strip().split()
+    if not tokens:
+        return None
+    parts = []
+    for tok in tokens:
+        low = tok.lower()
+        if low == "@user":
+            parts.append(r"(?P<user><@!?\d+>)")
+        elif low == "duration":
+            parts.append(r"(?P<duration>\S+)")
+        elif low == "amount":
+            parts.append(r"(?P<amount>\d+)")
+        elif low == "reason":
+            parts.append(r"(?P<reason>.+)")
+        else:
+            parts.append(re.escape(tok))
+    return re.compile(r"^\s*" + r"\s+".join(parts) + r"\s*$", re.IGNORECASE)
+
+
+async def process_command_aliases(message):
+    settings = await get_settings(message.guild.id)
+    aliases = settings.get("commandAliases", {})
+    if not aliases:
+        return False
+
+    for base, pattern in aliases.items():
+        regex = build_alias_regex(pattern)
+        if not regex:
+            continue
+        match = regex.match(message.content)
+        if not match:
+            continue
+
+        groups = match.groupdict()
+        member = None
+        if groups.get("user"):
+            uid = re.sub(r"\D", "", groups["user"])
+            if uid:
+                member = message.guild.get_member(int(uid))
+
+        if base == "timeout":
+            if not message.author.guild_permissions.moderate_members:
+                return True
+            if not member:
+                await message.channel.send("❌ حدد عضواً صحيحاً.")
+                return True
+            delta = parse_duration(groups.get("duration", ""))
+            if not delta or delta.total_seconds() <= 0:
+                await message.channel.send("❌ صيغة المدة غير صحيحة. مثال: `10m`.")
+                return True
+            if delta > MAX_TIMEOUT:
+                delta = MAX_TIMEOUT
+            try:
+                await member.timeout(delta, reason=f"Alias command by {message.author}")
+                await message.channel.send(f"🔇 تم إعطاء Timeout لـ {member.mention} لمدة **{format_duration(delta)}**.")
+            except discord.Forbidden:
+                pass
+            return True
+
+        if base == "kick":
+            if not message.author.guild_permissions.kick_members or not member:
+                return True
+            try:
+                await member.kick(reason=groups.get("reason") or "No reason provided")
+                await message.channel.send(f"👢 تم طرد {member.mention}.")
+            except discord.Forbidden:
+                pass
+            return True
+
+        if base == "ban":
+            if not message.author.guild_permissions.ban_members or not member:
+                return True
+            try:
+                await member.ban(reason=groups.get("reason") or "No reason provided")
+                await message.channel.send(f"🔨 تم حظر {member.mention}.")
+            except discord.Forbidden:
+                pass
+            return True
+
+        if base == "warn":
+            if not message.author.guild_permissions.moderate_members or not member:
+                return True
+            await add_warning(message.guild.id, member.id, message.author.id, groups.get("reason") or "No reason provided")
+            await message.channel.send(f"⚠️ تم تحذير {member.mention}.")
+            return True
+
+        if base == "clear":
+            if not message.author.guild_permissions.manage_messages:
+                return True
+            try:
+                amount = int(groups.get("amount") or 10)
+            except (TypeError, ValueError):
+                amount = 10
+            amount = max(1, min(amount, 100))
+            try:
+                await message.channel.purge(limit=amount + 1)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return True
+
+    return False
+
+
+# ============================================================
 # PROTECTION ENGINE
 # ============================================================
 
@@ -1424,7 +1846,7 @@ async def process_protection(message):
 
 
 # ============================================================
-# MESSAGE XP + PROTECTION
+# MESSAGE XP + PROTECTION + ALIASES + AUTO REPLIES
 # ============================================================
 
 @bot.event
@@ -1439,6 +1861,20 @@ async def on_message(message: discord.Message):
                 return
         except Exception as e:
             print("❌ Protection error:", repr(e))
+
+        try:
+            handled = await process_command_aliases(message)
+            if handled:
+                return
+        except Exception as e:
+            print("❌ Alias error:", repr(e))
+
+        try:
+            replied = await process_auto_replies(message)
+            if replied:
+                return
+        except Exception as e:
+            print("❌ Auto-reply error:", repr(e))
 
         try:
             old_level, new_level = await add_xp(message.guild.id, message.author.id, 5)
@@ -1497,6 +1933,10 @@ async def on_ready():
     print(f"🏠 Servers: {len(bot.guilds)}")
     print("🛡️ Protection: READY")
     print("⭐ XP System: READY")
+    print("🎫 Ticket System: READY")
+    print("👋 Welcome/Leave: READY")
+    print("💬 Auto Replies: READY")
+    print("⌨️ Command Aliases: READY")
     print("🌐 Website Settings: READY")
     print("==========================================")
 
@@ -1517,6 +1957,8 @@ async def setup_hook():
 
     try:
         bot.add_view(HelpView())
+        bot.add_view(TicketPanelView())
+        bot.add_view(TicketCloseView())
     except Exception as e:
         print("view registration error:", e)
 
